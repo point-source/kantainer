@@ -312,6 +312,12 @@ attach="$(jq -r '.systemd.units[] | select(.name == "kantainer-attach.service") 
 
 # ostree-image-signed: is what makes the rebase consult policy.json above.
 # Without the prefix the machine would pull the same image and verify nothing.
+#
+# If this assertion fails, do not just update the expected string. The prefix
+# decides the verification mode recorded in the deployment origin, and
+# update-preflight (§spec:os-updates) refuses to update any machine whose mode
+# is not `containerPolicy`. Getting it wrong ships a machine that installs,
+# serves, and then never updates again without saying so.
 if [[ "${attach}" == *"ostree-image-signed:docker://${IMAGE_REF}:${ATTACH_TAG}"* ]]; then
     ok "it attaches to the image image.env names, verifying the signature"
 else

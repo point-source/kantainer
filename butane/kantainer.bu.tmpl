@@ -48,6 +48,19 @@ systemd:
     # is verified exactly like every later update (§spec:os-updates), rather
     # than taking the image on trust once and checking from then on.
     #
+    # DO NOT CHANGE THAT PREFIX WITHOUT READING THIS. The verification mode is
+    # chosen HERE, once, and recorded in the deployment origin; every later
+    # update inherits it and never revisits it. `ostree-image-signed:` records
+    # it as `containerPolicy`, which is exactly what update-preflight
+    # (§spec:os-updates) requires before it will let this machine update at all.
+    #
+    # `ostree-unverified-registry:` - which uCore's own autorebase example uses
+    # for its first pass, so it is the obvious thing to copy - records
+    # `ContainerPolicyAllowInsecure` instead. A machine attached that way
+    # installs, serves, and then refuses every update for the rest of its life,
+    # with nothing wrong on the screen. The equivalent for `bootc switch` is
+    # --enforce-container-sigpolicy; both land on the same recorded mode.
+    #
     # --bypass-driver because Fedora CoreOS's own update driver owns rpm-ostree
     # and would otherwise refuse the transaction. This is the command uCore
     # documents for this transition; it is not a workaround of ours.
