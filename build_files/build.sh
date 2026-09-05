@@ -110,6 +110,7 @@ chmod 0644 /usr/lib/kantainer/portainer-image
 # invokes it.
 systemctl enable docker.service
 systemctl enable kantainer-portainer-load.service
+systemctl enable kantainer-portainer.service
 
 # The firewall (SPEC.md §spec:container-engine). firewalld is already installed
 # and already enabled in ucore-minimal, so there is nothing to switch on - only

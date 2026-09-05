@@ -1,0 +1,23 @@
+[Unit]
+Description=Portainer container management interface
+Documentation=https://docs.portainer.io/
+After=docker.service kantainer-portainer-load.service
+Requires=docker.service kantainer-portainer-load.service
+
+# Without a limit, a machine missing its administrator password would restart
+# Portainer forever and bury the one journal line that explains why. With it the
+# unit lands in "failed", where `systemctl status` says so plainly.
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStartPre=/usr/libexec/kantainer/portainer-preflight
+ExecStartPre=-/usr/bin/docker rm --force kantainer-portainer
+ExecStart=/usr/libexec/kantainer/portainer-run
+ExecStop=/usr/bin/docker stop kantainer-portainer
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

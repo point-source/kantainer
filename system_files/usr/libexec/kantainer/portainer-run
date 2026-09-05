@@ -1,0 +1,48 @@
+#!/bin/bash
+# Run Portainer (SPEC.md §spec:portainer-service).
+#
+# A script rather than a bare ExecStart= so the reference comes from the file the
+# build wrote, and so the reasoning behind each flag sits where the next reader
+# will look for it.
+
+set -oue pipefail
+
+read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
+
+# --admin-password-file  reads the plain password and creates the administrator
+#     BEFORE the web server accepts its first connection. That is what removes
+#     the setup screen, and with it Portainer's setup token (which it would
+#     otherwise print only to its own log) and its five-minute initialisation
+#     lockout - neither mechanism ever engages once an administrator exists.
+#     It is first-run only and is ignored on later boots, so it stays here.
+#     Not --admin-password: that one takes a bcrypt hash, stores it without
+#     checking it, and would be subject to $-expansion on the way through.
+#
+# -H unix://...          creates the connection to the local Docker engine, so
+#     the operator's first login lands on a working dashboard instead of an
+#     "add an environment" wizard. Mounting the socket alone does not do this.
+#     Portainer stats the socket at startup and exits if it is absent, which is
+#     why the unit orders itself after docker.service.
+#
+# --http-disabled        stops the plain-HTTP listener on 9000. The HTTPS
+#     listener generates its own certificate on first run and reuses it from
+#     /data thereafter. Note this setting is recorded in Portainer's database
+#     and persists: removing the flag later will not bring 9000 back.
+#
+# Only 9443 is published. Portainer's agent tunnel always binds inside the
+# container and has no disable flag, so not publishing it is what closes it -
+# the firewall does not filter published container ports.
+#
+# No --restart flag: systemd owns this container's lifecycle. Two supervisors
+# over one container is a fight nobody wins. Containers the operator deploys
+# through Portainer keep using Docker's own restart policy.
+exec /usr/bin/docker run --rm --name kantainer-portainer \
+    --publish 9443:9443 \
+    --volume /run/docker.sock:/var/run/docker.sock \
+    --volume /var/lib/portainer:/data \
+    --volume /run/kantainer/portainer-admin-password:/run/portainer-admin-password:ro \
+    "${IMAGE_REF}" \
+    --admin-password-file=/run/portainer-admin-password \
+    -H unix:///var/run/docker.sock \
+    --http-disabled \
+    --bind-https=:9443
