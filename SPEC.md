@@ -43,6 +43,14 @@ Cites §req:constraints, §req:quality-attributes.
 device to write and no machine to boot, so the write itself, both reboots and the signature
 refusal remain unobserved. Everything up to the write is covered by `just ci`.
 
+One thing to capture on the first hardware run, because no test on either side can reach it:
+after the machine attaches itself, `bootc status` must report its signature mode as
+`containerPolicy`. §spec:os-updates refuses to update a machine that reports anything else,
+and the two halves meet only on a booted machine. The attachment's `ostree-image-signed:`
+prefix is defined to produce exactly that mode, so this is a confirmation rather than an open
+question — but a machine that got it wrong would install, serve, and then quietly never
+update again.
+
 The operator produces a bootable USB stick with one command, from two inputs: the Fedora
 CoreOS installer image and their filled-in configuration file. Booting a target machine
 from that stick installs the operating system to disk and reboots, with no keyboard input,
