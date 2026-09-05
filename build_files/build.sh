@@ -5,8 +5,9 @@
 # Section order matters:
 #   1. system_files    - static files from the repository
 #   2. packages        - LATER BATCHES ADD PACKAGE INSTALLS HERE
-#   3. cleanup         - dnf leftovers, or `bootc container lint` warns
-#   4. signing policy  - must stay LAST, so no package transaction can replace
+#   3. services        - what runs on the installed machine
+#   4. cleanup         - dnf leftovers, or `bootc container lint` warns
+#   5. signing policy  - must stay LAST, so no package transaction can replace
 #                        /etc/containers/policy.json after we have merged it
 
 set -ouex pipefail
@@ -45,7 +46,36 @@ dnf5 -y install \
     brcmfmac-firmware \
     mt7xxx-firmware
 
-### 3. Cleanup
+### 3. Services (SPEC.md §spec:container-engine)
+#
+# Docker runs from first boot. ucore-minimal ships moby-engine - it comes from
+# the Fedora CoreOS base - but uCore's post-install runs `systemctl disable
+# docker.socket` to stop the daemon activating by accident alongside podman,
+# which it prefers. Nothing preset-enables docker.service either, so an
+# untouched machine has no container engine running at all.
+#
+# We enable the SERVICE, not the socket. Socket activation is lazy: the daemon
+# would not start until something spoke to it, and §spec:container-engine wants
+# the engine running from first boot. docker.service carries
+# `Requires=docker.socket`, so the socket comes along regardless of its own
+# enablement.
+#
+# This writes a symlink into /etc, which is exactly how the base image enables
+# firewalld and sshd. In a bootc image /etc is the ostree *default* (committed
+# to /usr/etc), not a local modification, so it ships on a fresh install and
+# updates normally - while an operator who later disables Docker on their own
+# machine keeps that decision across updates.
+#
+# A preset file in /usr/lib/systemd/system-preset/ was rejected: presets are
+# inert data, and nothing runs `systemctl preset` in a hand-written derived
+# layer. It would look correct and do nothing.
+#
+# Podman stays installed and carries no workloads (§spec:container-engine).
+# Removing it fights the base image for no gain - it is inert when nothing
+# invokes it.
+systemctl enable docker.service
+
+### 4. Cleanup
 #
 # uCore's own cleanup does not run for this layer, and `dnf5 clean all` leaves
 # /run/dnf and /var/lib/dnf/repos behind. Both trip `bootc container lint`
@@ -56,7 +86,7 @@ dnf5 -y install \
 dnf5 clean all
 rm -rf /var/lib/dnf /run/dnf
 
-### 4. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
+### 5. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
 #
 # KEEP THIS LAST. containers-common can be pulled into any package transaction
 # and replaces /etc/containers/policy.json when it is, so anything installed
