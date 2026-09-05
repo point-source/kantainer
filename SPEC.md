@@ -39,7 +39,25 @@ Cites §req:constraints, §req:quality-attributes.
 
 ## Installer media §spec:installer-media
 
-*Status: not started*
+*Status: complete* — not yet confirmed on real hardware: the build environment has no
+USB device to write and no machine to boot, so the write itself, both reboots and the
+signature refusal remain unobserved. Everything up to the write is covered by `just ci`.
+
+`just flash` fetches the Fedora CoreOS release pinned in `versions.env`, verifies it
+against the committed checksum, personalises it with the operator's configuration, and
+writes the stick. The installed machine attaches itself with
+`rpm-ostree rebase ostree-image-signed:`, verified against a policy the same command
+places on it during installation.
+
+One consequence of that placement is worth recording, because it is permanent. ostree
+carries `/etc` forward as local modification, so after the rebase the machine's
+`/etc/containers/policy.json`, signing key and `registries.d` entry are the copies the
+installer wrote, shadowing the image's own for the life of the machine. Two effects,
+both accepted: the image's `ghcr.io/ublue-os` scope is absent on an installed machine,
+which costs nothing because it only ever pulls its own image; and a later change to the
+image's policy reaches an installed machine by reflashing rather than by updating. A
+rotated signing key therefore stops that machine updating rather than being accepted
+silently — it fails closed.
 
 The operator produces a bootable USB stick with one command, from two inputs: the Fedora
 CoreOS installer image and their filled-in configuration file. Booting a target machine
@@ -145,7 +163,19 @@ Cites §req:success-criteria (1, 4, 10), §req:constraints, §req:quality-attrib
 
 ## Drive selection §spec:drive-selection
 
-*Status: not started*
+*Status: complete* — not yet confirmed on real hardware: the rule itself is driven by
+`scripts/test-install-to-disk.sh` against fixtures for every case, but no two-disk
+machine has been booted to watch it stop.
+
+The rule is `scripts/install-to-disk`, carried into the installer environment by
+`just flash` and run by `kantainer-install.service`. `coreos-installer`'s unattended
+mode is not used at all.
+
+The boot medium is excluded for correctness rather than only for safety: a single-drive
+machine has the USB stick attached while the rule runs, so counting it would present two
+drives and stop at a prompt, breaking the unattended installation §req:success-criteria
+item 2 asks for. It is identified from `coreos.liveiso=`, the live ISO's own account of
+itself, and the rule refuses outright rather than guessing if that cannot be resolved.
 
 When the configuration file names a target drive, the installer uses it. When it does not
 and the machine has exactly one drive, the installer uses that drive. When it does not and
