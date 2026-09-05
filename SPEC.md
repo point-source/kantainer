@@ -2,7 +2,10 @@
 
 ## Base image and composition §spec:base-image
 
-*Status: not started*
+*Status: in progress* — the derivation and wireless restoration are built; the Docker
+engine, Portainer and boot-health checking are added by later work. The base is
+`ghcr.io/ublue-os/ucore-minimal:stable-20260904`, pinned by digest in `Containerfile`
+and recorded in `versions.env`.
 
 The system is a single bootable container image derived from uCore's minimal variant,
 published to a container registry by the repository's own automation. It adds to that
@@ -406,16 +409,28 @@ Cites §req:success-criteria (8), §req:quality-attributes, §req:priorities.
 
 ## Image publication §spec:image-publication
 
-*Status: not started*
+*Status: complete*
 
-Changing a file in the repository and pushing produces a newly built, signed, published
-kantainer image without any manual build step. That published image is what installed
-machines update themselves from, so a push is how a change reaches the machine.
+Pushing to the default branch produces a newly built, signed, published kantainer image at
+`ghcr.io/point-source/kantainer` with no manual build step. That published image is what
+installed machines update themselves from, so a push is how a change reaches the machine.
+A pull request builds the image but publishes nothing, so a change that breaks the build is
+caught before it can reach a machine, and a fork cannot publish under this project's name.
 
 The build runs in the repository's automation rather than on the operator's computer, so
 building twice from the same repository state produces an image that behaves the same way.
-The versions the image depends on are pinned in the repository, so a rebuild is a rebuild
-rather than a fresh roll of the dice.
+The base image and the Fedora CoreOS release are pinned by digest and by version, so a
+rebuild is a rebuild rather than a fresh roll of the dice. The repository's own gate refuses
+a base image that is not pinned, and refuses a pin that disagrees with the recorded one —
+the two are written in different files for different consumers, and drift between them would
+otherwise be silent.
+
+Signing uses a keypair whose public half is committed and whose private half lives only in a
+repository secret. The signature covers the digest rather than a tag, because a tag resolves
+to different content over time while the machine verifies the digest it actually pulled.
+After signing, the automation verifies the new signature against the committed public key: a
+key mismatch and a signature written in a format the machine cannot read are both silent at
+signing time and would otherwise strand every installed machine at once.
 
 The installer image is not published. It is produced by the operator's flash command from
 the pinned Fedora CoreOS release and their configuration file.
