@@ -155,6 +155,59 @@ systemctl enable kantainer-portainer.service
 sed -i 's|^DefaultZone=.*|DefaultZone=kantainer|' /etc/firewalld/firewalld.conf
 grep -q '^DefaultZone=kantainer$' /etc/firewalld/firewalld.conf
 
+# Automatic updates (SPEC.md §spec:os-updates)
+#
+# The base image ships THREE update mechanisms and has the wrong one switched
+# on. Verified against ucore-minimal:stable-20260904, not assumed:
+#
+#   zincati.service                  present, NOT enabled. Fedora CoreOS's own
+#                                    agent, which updates from CoreOS streams
+#                                    rather than from our published image.
+#   rpm-ostreed-automatic.timer      ENABLED, and /etc/rpm-ostreed.conf sets
+#                                    AutomaticUpdatePolicy=stage. It downloads
+#                                    and stages updates and never reboots, so an
+#                                    untouched machine accumulates updates it
+#                                    never runs while looking perfectly healthy.
+#   bootc-fetch-apply-updates.timer  present, NOT enabled. Its service runs
+#                                    `bootc upgrade --apply`, which fetches the
+#                                    new published image AND reboots into it.
+#
+# So the applying mechanism already exists and is maintained upstream; the work
+# is switching the right one on and retiring the wrong one. The schedule comes
+# from the drop-in in system_files.
+systemctl enable bootc-fetch-apply-updates.timer
+
+# Disable AND mask, in that order and for different reasons. `mask` alone leaves
+# /etc/systemd/system/timers.target.wants/rpm-ostreed-automatic.timer behind, so
+# the machine would still report a staging timer among its enabled units;
+# `disable` alone leaves a unit anything could switch back on. Doing both is
+# what makes "no staging-only service is left enabled" true and checkable.
+systemctl disable rpm-ostreed-automatic.timer
+systemctl mask rpm-ostreed-automatic.timer
+
+# zincati is already off - uCore disabled it - but it is enabled in the inert
+# /usr/lib/systemd/system-preset/40-coreos.preset, so anything that ever ran
+# `systemctl preset` would bring back a second update agent pointing somewhere
+# else entirely. Masking states the decision instead of relying on absence.
+systemctl mask zincati.service
+
+# The timer above is what actually triggered staging, so this line is not what
+# stops it. It stops `rpm-ostree status` from reporting a staging policy the
+# machine no longer follows, and it neutralises
+# `rpm-ostree upgrade --trigger-automatic-update-policy` if anything ever
+# invokes it by hand.
+sed -i 's|^AutomaticUpdatePolicy=.*|AutomaticUpdatePolicy=none|' /etc/rpm-ostreed.conf
+grep -q '^AutomaticUpdatePolicy=none$' /etc/rpm-ostreed.conf
+
+# Assert the arrangement, because every way it can be wrong is silent on the
+# installed machine: a masked-but-still-wanted staging timer, or an applying
+# timer that was never enabled, both leave a machine that looks fine and stops
+# receiving fixes.
+test -L /etc/systemd/system/timers.target.wants/bootc-fetch-apply-updates.timer
+test ! -e /etc/systemd/system/timers.target.wants/rpm-ostreed-automatic.timer
+[[ "$(readlink /etc/systemd/system/rpm-ostreed-automatic.timer)" == /dev/null ]]
+[[ "$(readlink /etc/systemd/system/zincati.service)" == /dev/null ]]
+
 ### 4. Cleanup
 #
 # uCore's own cleanup does not run for this layer, and `dnf5 clean all` leaves
