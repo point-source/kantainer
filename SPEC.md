@@ -97,20 +97,23 @@ Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attrib
 
 ## Machine configuration §spec:machine-configuration
 
-*Status: not started*
+*Status: complete* — `kantainer.conf.example` carries the template and `just config-check`
+applies the rules below. `just flash` (see §spec:installer-media) wraps the same check.
 
 The repository carries a configuration template. The operator copies it, fills it in, and
 keeps their copy out of version control. It is the only place machine-specific values
-exist.
+exist. `kantainer.conf.example` is the authoritative list of what it carries: a login
+account, an SSH public key and the Portainer administrator password are required; a target
+drive and a wireless network name and passphrase are optional.
 
-The file carries: the login account name, the SSH public key that account accepts, and the
-Portainer administrator password. It optionally carries the target drive and optionally
-carries a wireless network name and passphrase.
+The file is parsed rather than executed, and each value is taken literally to the end of its
+line. The operator is not asked to learn shell quoting for a password.
 
-The flash command refuses to produce a stick when a required value is missing or when the
-Portainer password is shorter than the length Portainer itself will accept without demanding
-an immediate change. The refusal names the offending field. Nothing is written to the USB
-stick in that case.
+Validation refuses when a required value is missing, when the SSH public key is not one, or
+when the Portainer password is shorter than the length Portainer itself will accept without
+demanding an immediate change. The refusal names the offending field and exits non-zero.
+Nothing is written — not a USB stick, not a rendered configuration, not a temporary file
+left behind.
 
 **Decision and constraint.** The Portainer password is required rather than optional, which
 departs from §req:success-criteria item 4 and §req:priorities, where it ranks fifth as
@@ -178,7 +181,9 @@ Cites §req:success-criteria (9), §req:quality-attributes, §req:priorities,
 
 ## Network attachment §spec:network-attachment
 
-*Status: not started*
+*Status: complete* — wireless support is in the image (§spec:base-image) and the connection
+profile is built from the operator's configuration. A wired machine gets no configuration
+at all, which is the whole of the wired case.
 
 The machine obtains its address automatically. With a wired connection present it uses it
 and needs no configuration. When the configuration file names a wireless network and
@@ -305,10 +310,12 @@ Cites §req:success-criteria (3, 4, 5, 7), §req:constraints, §req:quality-attr
 
 ## Remote access §spec:remote-access
 
-*Status: not started*
+*Status: complete*
 
 The machine accepts SSH connections to the account named in the configuration file, using
-the public key that file carries. Password authentication is refused, for every account.
+the public key that file carries. That account can become root: remote access exists to
+look at a machine, and an account that cannot administer it cannot do that. Password
+authentication is refused, for every account.
 
 Remote access exists for the rare occasion something needs looking at. Nothing in normal
 operation — installing, reaching Portainer, deploying containers, updating, recovering from
@@ -318,6 +325,13 @@ a bad update — requires it.
 §req:success-criteria item 10 requires password logins to be refused. Refusing passwords
 outright, rather than merely not setting one, means a later change that sets a password
 somewhere cannot quietly open a door.
+
+Fedora CoreOS already disables password authentication. This repository restates it anyway,
+in a drop-in numbered *below* the platform's own, because sshd takes the first value it
+reads for a keyword: the lowest-numbered file is the authoritative one, and a higher number
+would leave ours the file being overridden rather than the one doing the overriding. Both
+`PasswordAuthentication` and `KbdInteractiveAuthentication` are refused, because they are
+two separate doors to a password prompt and closing one leaves the other open.
 
 **Alternatives rejected.** Leaving password authentication available for console recovery
 was rejected: §req:constraints puts one operator and one machine in scope, and a machine
