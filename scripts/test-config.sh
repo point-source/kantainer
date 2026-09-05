@@ -268,6 +268,103 @@ else
     not_ok "the Portainer password file holds the password and nothing else"
 fi
 
+### the signing material, placed during installation
+
+# SPEC.md §spec:installer-media: the machine attaches itself to the published
+# image on first boot, and that FIRST attachment is signature-verified like
+# every later update. That only works if the policy is on the machine before the
+# image is, which means it is placed here - while the machine is still stock
+# Fedora CoreOS with nothing of ours on it.
+#
+# Every failure below is silent from outside. A machine that accepts an unsigned
+# image looks exactly like one that verified it, right up until someone
+# publishes to the registry who should not have.
+IMAGE_REF="$(
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/image.env"
+    echo "${IMAGE_REGISTRY}/${REPO_ORGANIZATION}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]'
+)"
+ATTACH_TAG="$(
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/image.env"
+    echo "${DEFAULT_TAG}"
+)"
+
+if [[ "$(file_at /etc/pki/containers/kantainer.pub)" == "$(cat "${REPO_ROOT}/cosign.pub")" ]]; then
+    ok "the machine carries this repository's signing key"
+else
+    not_ok "the machine carries this repository's signing key"
+fi
+
+assert_jq "the machine carries a container signing policy at all" \
+    '[.storage.files[] | select(.path == "/etc/containers/policy.json")] | length' "1"
+
+policy="$(file_at /etc/containers/policy.json)"
+
+if jq -e --arg ref "${IMAGE_REF}" --arg key /etc/pki/containers/kantainer.pub '
+        .transports.docker[$ref]
+        | any(.type == "sigstoreSigned"
+              and .keyPath == $key
+              and .signedIdentity.type == "matchRepository")' <<< "${policy}" > /dev/null; then
+    ok "the published image is accepted only with a signature from that key"
+else
+    not_ok "the published image is accepted only with a signature from that key"
+fi
+
+# The docker transport default is consulted BEFORE the top-level default. A
+# machine that inherited an accept-anything transport default would take an
+# unsigned image no matter what the top-level default said.
+if jq -e '.transports.docker[""] | all(.type == "reject")' <<< "${policy}" > /dev/null &&
+        jq -e '.default | all(.type == "reject")' <<< "${policy}" > /dev/null; then
+    ok "an image outside that scope is rejected rather than accepted unsigned"
+else
+    not_ok "an image outside that scope is rejected rather than accepted unsigned"
+fi
+
+# Without this, containers/image never looks for a cosign signature, finds none,
+# and refuses an image that is in fact correctly signed.
+if [[ "$(file_at /etc/containers/registries.d/kantainer.yaml)" == *"${IMAGE_REF}:"* &&
+      "$(file_at /etc/containers/registries.d/kantainer.yaml)" == *"use-sigstore-attachments: true"* ]]; then
+    ok "containers/image is told to look for cosign signatures on that image"
+else
+    not_ok "containers/image is told to look for cosign signatures on that image"
+fi
+
+### the second stage
+
+assert_jq "the machine is set up to attach itself to its own image" \
+    '.systemd.units[] | select(.name == "kantainer-attach.service") | .enabled' "true"
+
+attach="$(jq -r '.systemd.units[] | select(.name == "kantainer-attach.service") | .contents' < "${WORK}/out.json")"
+
+# ostree-image-signed: is what makes the rebase consult policy.json above.
+# Without the prefix the machine would pull the same image and verify nothing.
+if [[ "${attach}" == *"ostree-image-signed:docker://${IMAGE_REF}:${ATTACH_TAG}"* ]]; then
+    ok "it attaches to the image image.env names, verifying the signature"
+else
+    not_ok "it attaches to the image image.env names, verifying the signature"
+fi
+
+# The scope the machine verifies against and the image it attaches to are
+# generated from one string. If they ever named different things the machine
+# would look up a scope that is not in its policy, and the refusal would arrive
+# months later as an update that silently stopped happening.
+if jq -e --arg ref "${IMAGE_REF}" '.transports.docker | has($ref)' <<< "${policy}" > /dev/null &&
+        [[ "${attach}" == *"${IMAGE_REF}:"* ]]; then
+    ok "the policy scope and the attachment name the same image"
+else
+    not_ok "the policy scope and the attachment name the same image"
+fi
+
+# A machine that has already attached must not attach again: the rebase merges
+# /etc into the new deployment as part of its own transaction, so a stamp
+# written afterwards would be left behind and the machine would loop.
+if [[ "${attach}" == *"ConditionPathExists=!/usr/lib/kantainer/os-image"* ]]; then
+    ok "it stops once the machine is running the kantainer image"
+else
+    not_ok "it stops once the machine is running the kantainer image"
+fi
+
 ### wireless, or the pointed absence of it
 
 render "KANTAINER_WIFI_SSID=" "KANTAINER_WIFI_PASSPHRASE="
