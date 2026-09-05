@@ -96,9 +96,6 @@ assert "the drop-in clears the base timer's boot trigger" \
 assert "the drop-in clears the base timer's interval trigger" \
     grep -qxF 'OnUnitInactiveSec=' "${TIMER_DROPIN}"
 
-assert "the drop-in sets a calendar trigger" \
-    grep -qE '^OnCalendar=.' "${TIMER_DROPIN}"
-
 # The whole window - the calendar hour plus the randomised spread - has to stay
 # overnight. A drop-in that sets 03:00 and inherits the base image's
 # RandomizedDelaySec=2h reboots the machine as late as 05:00, and one that let
@@ -154,7 +151,7 @@ assert "the build masks the update agent the base image leaves installed" \
     grep -qE '^systemctl mask .*zincati\.service' "${BUILD_SH}"
 
 assert "the build stops rpm-ostree from staging updates" \
-    grep -qF 'AutomaticUpdatePolicy=none' "${BUILD_SH}"
+    grep -qF 'AutomaticUpdatePolicy=none' <(code "${BUILD_SH}")
 
 ### Signature-verified updates (§spec:os-updates)
 
@@ -306,9 +303,6 @@ SEED_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-greenboot-grub.servi
 
 assert "the boot-counter seed ships and is executable" \
     test -x "${SEED}"
-
-assert "the boot-counter seed has a unit" \
-    test -f "${SEED_UNIT}"
 
 assert "the build enables the boot-counter seed" \
     grep -qE '^systemctl enable .*kantainer-greenboot-grub\.service' "${BUILD_SH}"

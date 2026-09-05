@@ -223,14 +223,14 @@ systemctl mask zincati.service
 sed -i 's|^AutomaticUpdatePolicy=.*|AutomaticUpdatePolicy=none|' /etc/rpm-ostreed.conf
 grep -q '^AutomaticUpdatePolicy=none$' /etc/rpm-ostreed.conf
 
-# Assert the arrangement, because every way it can be wrong is silent on the
-# installed machine: a masked-but-still-wanted staging timer, or an applying
-# timer that was never enabled, both leave a machine that looks fine and stops
-# receiving fixes.
-test -L /etc/systemd/system/timers.target.wants/bootc-fetch-apply-updates.timer
+# One assertion, for the one thing no command above reports. `disable` and
+# `mask` both exit non-zero on failure and this script runs under `set -e`, so
+# asserting that they did what they said is our copy of systemd's own verdict -
+# and ours is the copy that goes stale. What neither exit status covers is the
+# COMBINATION: `mask` succeeds perfectly well while the enablement symlink is
+# still there, and a machine in that state still reports a staging timer among
+# its enabled units. That is the state this line rules out.
 test ! -e /etc/systemd/system/timers.target.wants/rpm-ostreed-automatic.timer
-[[ "$(readlink /etc/systemd/system/rpm-ostreed-automatic.timer)" == /dev/null ]]
-[[ "$(readlink /etc/systemd/system/zincati.service)" == /dev/null ]]
 
 # Boot health checking (SPEC.md §spec:boot-health-and-rollback).
 #
@@ -247,12 +247,15 @@ systemctl enable greenboot-healthcheck.service
 # This unit puts it there. See the script for the whole reasoning.
 systemctl enable kantainer-greenboot-grub.service
 
-# Assert both, because the second one arrives by implication and would vanish
-# silently if greenboot ever dropped that Also=. A machine with the health check
-# running and the counter never armed reports itself healthy, fails nothing, and
-# has no rollback at all.
-test -L /etc/systemd/system/multi-user.target.wants/greenboot-healthcheck.service
+# The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
+# no exit status above reports it. If greenboot ever dropped that line, the
+# enable would still succeed and the machine would run the health check, report
+# itself healthy, fail nothing, and have no rollback at all.
 test -L /etc/systemd/system/ostree-finalize-staged.service.requires/greenboot-set-rollback-trigger.service
+
+# greenboot SKIPS a check that is not executable rather than failing it, so a
+# mode that did not survive the copy would leave a machine with no health check
+# and nothing anywhere saying so.
 test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
 
 ### 4. Cleanup
