@@ -35,9 +35,13 @@ for var in UCORE_IMAGE UCORE_TAG UCORE_DIGEST FCOS_STREAM FCOS_VERSION FCOS_ISO_
     [[ -n "${!var:-}" ]] || fail "versions.env does not set ${var}"
 done
 
-# A pin that is not the shape of a pin is a floating tag wearing its name. Both
-# of these are read by tools that would accept the wrong thing quietly: podman
-# resolves a tag, and sha256sum refuses a malformed line by skipping it.
+# A pin that is not the shape of a pin is a floating tag wearing its name.
+#
+# Neither consumer would accept one: sha256sum refuses a malformed checksum line
+# outright, and podman cannot parse `image@release` as a reference at all. This
+# check buys WHEN the refusal arrives, not whether - here on a pull request,
+# rather than on the operator's machine after a 1.3 GB download. That is the
+# same trade the PORTAINER_DIGEST check below already makes.
 require_digest() {
     [[ "${!1}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
         fail "${1} is not a sha256 digest: ${!1}
@@ -85,8 +89,6 @@ require_digest PORTAINER_DIGEST
 
 # The tool `just flash` personalises the installer with, and the checksum that
 # same command verifies the installer against (SPEC.md §spec:installer-media).
-# A checksum that is not a checksum cannot refuse a corrupted download, and the
-# consequence lands on a USB stick rather than in this gate.
 require_digest COREOS_INSTALLER_DIGEST
 
 [[ "${FCOS_ISO_SHA256}" =~ ^[0-9a-f]{64}$ ]] ||
