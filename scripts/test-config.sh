@@ -537,6 +537,25 @@ publishable() {
     fi
 }
 
+# A drive is named as a device path, or the installer has nothing to look for.
+# `sda` renders happily and then refuses on a headless machine that has already
+# been carried to wherever it lives.
+config "${WORK}/bare-drive.conf" "KANTAINER_TARGET_DRIVE=sda"
+if err="$("${CHECK}" "${WORK}/bare-drive.conf" 2>&1)"; then
+    not_ok "refuses a target drive that is not a device path"
+elif [[ "${err}" == *KANTAINER_TARGET_DRIVE* ]]; then
+    ok "refuses a target drive that is not a device path"
+else
+    not_ok "refuses a target drive that is not a device path (wrong reason: ${err})"
+fi
+
+config "${WORK}/drive.conf" "KANTAINER_TARGET_DRIVE=/dev/nvme0n1"
+if "${CHECK}" "${WORK}/drive.conf" > /dev/null 2>&1; then
+    ok "accepts a target drive that is a device path"
+else
+    not_ok "accepts a target drive that is a device path"
+fi
+
 publishable "refuses a config the repository would publish" refused "operator-secrets.conf"
 publishable "accepts a config the repository already ignores" accepted "kantainer.conf"
 

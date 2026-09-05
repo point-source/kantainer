@@ -135,6 +135,16 @@ kantainer_validate_config() {
     Portainer forces a change at first login below that, which is the trip to
     the machine this password exists to avoid."
 
+    # A drive is named the way the machine will look for it. `sda` renders
+    # happily and then refuses on a machine that has already been carried to
+    # wherever it lives, with nobody watching (SPEC.md §spec:drive-selection).
+    if [[ -n "${KANTAINER_TARGET_DRIVE}" ]]; then
+        [[ "${KANTAINER_TARGET_DRIVE}" == /dev/* ]] ||
+            kantainer_fail "KANTAINER_TARGET_DRIVE is not a device path: ${KANTAINER_TARGET_DRIVE}
+    Name it as the machine will see it, e.g. /dev/sda or /dev/nvme0n1, or leave
+    it blank to install to the machine's only drive."
+    fi
+
     # Wireless is optional as a pair. Half of it renders a profile that cannot
     # associate, and nothing says so until someone walks to the machine.
     if [[ -n "${KANTAINER_WIFI_SSID}" && -z "${KANTAINER_WIFI_PASSPHRASE}" ]]; then

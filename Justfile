@@ -403,3 +403,18 @@ config-check config="kantainer.conf":
 [group('Operator')]
 render config="kantainer.conf":
     @./scripts/render-ignition.sh "{{ config }}"
+
+# `just flash` is the one command the operator runs: their configuration and a
+# device in, a bootable stick out (SPEC.md §spec:installer-media). Everything
+# that can refuse does so before the device is touched, and the last step names
+# the model and size of what is about to be erased and waits for the operator to
+# type its path back.
+#
+# The media is built here and never published: it carries their account, key and
+# password, and this repository is public. Run it as `just flash /dev/sdb`; a
+# second argument names a configuration kept somewhere else.
+
+# Write the installer to a USB stick - THIS ERASES THE DEVICE YOU NAME
+[group('Operator')]
+flash device config="kantainer.conf":
+    @./scripts/flash.sh "{{ device }}" "{{ config }}"
