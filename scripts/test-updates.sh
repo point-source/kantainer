@@ -224,6 +224,7 @@ preflight_with "the preflight refuses a status shape it does not recognise" 1 0 
 ### The boot health check (§spec:boot-health-and-rollback)
 
 HEALTH_CHECK="${SYSTEM_FILES}/usr/lib/greenboot/check/required.d/50_docker_active.sh"
+HEALTH_DROPIN="${SYSTEM_FILES}/usr/lib/systemd/system/greenboot-healthcheck.service.d/10-kantainer.conf"
 
 assert "the health check ships where greenboot requires it and is executable" \
     test -x "${HEALTH_CHECK}"
@@ -250,6 +251,21 @@ assert "the build enables the greenboot health check" \
 
 assert "the health check asks about the Docker engine" \
     grep -qF 'docker.service' "${HEALTH_CHECK}"
+
+# Without this the check is nearly certain to run BEFORE Docker is up, and a
+# check that is wrong in the strict direction is the failure this whole section
+# exists to avoid. greenboot-healthcheck.service carries no After= of its own -
+# only the implicit After=basic.target - while docker.service waits on
+# network-online.target and is Type=notify. Both are WantedBy=multi-user.target,
+# which orders neither against the other. The check would read Docker as
+# inactive on an ordinary boot, and on the boot after an update - the one where
+# greenboot has armed the counter - that means reboot, reboot, roll back a
+# perfectly good update, forever.
+#
+# After= alone, deliberately not Requires=: if Docker genuinely fails to start,
+# ordering is still satisfied and the check runs and honestly reports it red.
+assert "the health check is ordered after the engine it tests" \
+    grep -qxF 'After=docker.service' "${HEALTH_DROPIN}"
 
 # The narrowness is the design, not an omission. A check that failed a boot
 # because Portainer was slow to start would roll back a perfectly good operating
