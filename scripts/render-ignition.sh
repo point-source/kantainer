@@ -26,7 +26,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${1:-kantainer.conf}"
 
 kantainer_load_config "${CONFIG}"
-kantainer_validate_config
+kantainer_validate_config "${CONFIG}"
 
 command -v butane > /dev/null ||
     kantainer_fail "butane is not on PATH
@@ -68,13 +68,35 @@ printf '%s\n' "${template}" > "${BUTANE}"
 # machine carries no wireless configuration at all (§spec:network-attachment),
 # and wired DHCP needs none.
 if [[ -n "${KANTAINER_WIFI_SSID}" ]]; then
-    # Keyfile values run to the end of the line, so the SSID and passphrase go in
-    # literally - and for the same reason as above, by parameter expansion. A
-    # WPA passphrase is any printable character, & and \ among them.
-    profile="$(< "${REPO_ROOT}/butane/wireless.nmconnection.tmpl")"
-    profile="$(fill "${profile}" "@@SSID@@" "${KANTAINER_WIFI_SSID}")"
-    profile="$(fill "${profile}" "@@PSK@@" "${KANTAINER_WIFI_PASSPHRASE}")"
-    printf '%s\n' "${profile}" > "${STAGING}/kantainer-wireless.nmconnection"
+    # The keyfile is read by NetworkManager through GLib, whose key-file parser
+    # is NOT "everything to the end of the line". A backslash starts an escape
+    # sequence, and an unrecognised one makes the whole value unreadable: the
+    # profile is then rejected, the machine never joins the network, and nobody
+    # finds out until they walk to it. A leading space or tab is dropped just as
+    # quietly, which associates with the wrong secret. Both are escaped here;
+    # every other character, & | % and quotes included, goes in as it is.
+    keyfile_escape() {
+        local value="${1//\\/\\\\}"
+        case "${value}" in
+            " "*) value="\\s${value#" "}" ;;
+            "	"*) value="\\t${value#"	"}" ;;
+        esac
+        printf '%s' "${value}"
+    }
+
+    # Matched on the whole line rather than on the placeholder anywhere in the
+    # file, so a network name that happens to contain the other placeholder
+    # cannot have the passphrase substituted into it.
+    profile=""
+    while IFS= read -r line; do
+        case "${line}" in
+            "ssid=@@SSID@@") line="ssid=$(keyfile_escape "${KANTAINER_WIFI_SSID}")" ;;
+            "psk=@@PSK@@") line="psk=$(keyfile_escape "${KANTAINER_WIFI_PASSPHRASE}")" ;;
+        esac
+        profile+="${line}"$'\n'
+    done < "${REPO_ROOT}/butane/wireless.nmconnection.tmpl"
+
+    printf '%s' "${profile}" > "${STAGING}/kantainer-wireless.nmconnection"
 
     cat "${REPO_ROOT}/butane/wireless.bu.tmpl" >> "${BUTANE}"
 fi

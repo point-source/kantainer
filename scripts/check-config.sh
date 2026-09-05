@@ -19,7 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${1:-kantainer.conf}"
 
 kantainer_load_config "${CONFIG}"
-kantainer_validate_config
+kantainer_validate_config "${CONFIG}"
 
 # What the operator gets to check at a glance. The password and the passphrase
 # are deliberately absent: this line ends up in terminals, scrollbacks and

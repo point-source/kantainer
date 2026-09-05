@@ -283,17 +283,68 @@ assert_jq "a wireless machine carries a NetworkManager profile" \
 assert_jq "NetworkManager will not ignore that profile" \
     '.storage.files[] | select(.path == "/etc/NetworkManager/system-connections/kantainer-wireless.nmconnection") | "\(.mode) \(.user.id):\(.group.id)"' "384 0:0"
 
-profile="$(file_at /etc/NetworkManager/system-connections/kantainer-wireless.nmconnection)"
-if [[ "${profile}" == *"ssid=${TEST_SSID}"* ]]; then
-    ok "the profile names the operator's network"
-else
-    not_ok "the profile names the operator's network"
-fi
-if [[ "${profile}" == *"psk=${TEST_PASSPHRASE}"* ]]; then
-    ok "the profile carries the passphrase verbatim"
-else
-    not_ok "the profile carries the passphrase verbatim"
-fi
+# NetworkManager reads its keyfiles through GLib, and GLib's key-file parser
+# treats a backslash as an escape and strips a leading space. Asserting the raw
+# bytes we wrote would pass for a profile NetworkManager refuses to read, so the
+# assertions below go through GLib itself and compare what it reads BACK.
+cat > "${WORK}/keyfile-read.py" << 'PYEOF'
+import ctypes, ctypes.util, sys
+
+name = ctypes.util.find_library("glib-2.0")
+if not name:
+    sys.exit(3)
+glib = ctypes.CDLL(name)
+glib.g_key_file_new.restype = ctypes.c_void_p
+glib.g_key_file_load_from_data.argtypes = [
+    ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+glib.g_key_file_get_string.argtypes = [
+    ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+    ctypes.POINTER(ctypes.c_void_p)]
+glib.g_key_file_get_string.restype = ctypes.c_char_p
+
+data = open(sys.argv[1], "rb").read()
+handle = glib.g_key_file_new()
+err = ctypes.c_void_p()
+if not glib.g_key_file_load_from_data(handle, data, len(data), 0, ctypes.byref(err)):
+    sys.exit(1)
+err = ctypes.c_void_p()
+value = glib.g_key_file_get_string(
+    handle, sys.argv[2].encode(), sys.argv[3].encode(), ctypes.byref(err))
+if err:
+    sys.exit(1)
+sys.stdout.buffer.write(value)
+PYEOF
+
+# keyfile_value <group> <key> - what GLib reads back from the rendered profile.
+keyfile_value() {
+    file_at /etc/NetworkManager/system-connections/kantainer-wireless.nmconnection \
+        > "${WORK}/profile.keyfile"
+    python3 "${WORK}/keyfile-read.py" "${WORK}/profile.keyfile" "$1" "$2"
+}
+
+# reads_back <name> <group> <key> <expected>
+reads_back() {
+    local name="$1" group="$2" key="$3" want="$4" got status=0
+    got="$(keyfile_value "${group}" "${key}")" || status=$?
+
+    if [[ "${status}" -eq 3 ]]; then
+        not_ok "${name} (GLib not available - install libglib2.0 to run this check)"
+        return
+    fi
+    if [[ "${status}" -ne 0 ]]; then
+        not_ok "${name} (NetworkManager's parser rejects the profile)"
+        return
+    fi
+    if [[ "${got}" != "${want}" ]]; then
+        not_ok "${name} (NetworkManager would read '${got}')"
+        return
+    fi
+    ok "${name}"
+}
+
+reads_back "NetworkManager reads back the operator's network" wifi ssid "${TEST_SSID}"
+reads_back "NetworkManager reads back the passphrase" wifi-security psk "${TEST_PASSPHRASE}"
 
 ### values that are hostile to a templating engine
 
@@ -313,17 +364,16 @@ render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
 assert_jq "an SSH key comment containing & \\ | % survives intact" \
     '.passwd.users[0].sshAuthorizedKeys[0]' "${AWKWARD_KEY}"
 
-profile="$(file_at /etc/NetworkManager/system-connections/kantainer-wireless.nmconnection)"
-if [[ "${profile}" == *"ssid=${AWKWARD_SSID}"* ]]; then
-    ok "an SSID containing & and \\ survives intact"
-else
-    not_ok "an SSID containing & and \\ survives intact"
-fi
-if [[ "${profile}" == *"psk=${AWKWARD_PSK}"* ]]; then
-    ok "a passphrase containing & \\ | % survives intact"
-else
-    not_ok "a passphrase containing & \\ | % survives intact"
-fi
+reads_back "an SSID containing & and \\ reaches NetworkManager intact" \
+    wifi ssid "${AWKWARD_SSID}"
+reads_back "a passphrase containing & \\ | % reaches NetworkManager intact" \
+    wifi-security psk "${AWKWARD_PSK}"
+
+# A leading space is the other half of GLib's escaping rule: written raw it is
+# silently dropped, and the machine tries to associate with the wrong secret.
+render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE= ${TEST_PASSPHRASE} "
+reads_back "a passphrase with a leading space keeps it" \
+    wifi-security psk " ${TEST_PASSPHRASE} "
 
 AWKWARD_PASSWORD="${TEST_PASSWORD}"'&\|%'
 render "KANTAINER_PORTAINER_PASSWORD=${AWKWARD_PASSWORD}"
@@ -364,6 +414,42 @@ render_refuses "refuses to render without an SSH public key" "KANTAINER_SSH_PUBL
     "KANTAINER_SSH_PUBLIC_KEY="
 render_refuses "refuses to render a password Portainer would reject" "KANTAINER_PORTAINER_PASSWORD" \
     "KANTAINER_PORTAINER_PASSWORD=hunt"
+
+### a config the operator could publish by accident
+
+# This repository is public and the file carries a password. A config kept
+# inside the working tree under a name .gitignore does not cover is one
+# `git add .` away from being published, and a published password stays
+# published. git's own check-ignore is the verdict.
+publishable() {
+    local name="$1" want="$2" path="${REPO_ROOT}/$3"
+    config "${path}"
+
+    local out status=0
+    out="$("${CHECK}" "${path}" 2>&1)" || status=$?
+    rm -f "${path}"
+
+    if [[ "${want}" == "refused" && "${status}" -eq 0 ]]; then
+        not_ok "${name} (accepted it)"
+    elif [[ "${want}" == "refused" && "${out}" != *"git does not ignore"* ]]; then
+        not_ok "${name} (refused for another reason: ${out})"
+    elif [[ "${want}" == "accepted" && "${status}" -ne 0 ]]; then
+        not_ok "${name} (refused: ${out})"
+    else
+        ok "${name}"
+    fi
+}
+
+publishable "refuses a config the repository would publish" refused "operator-secrets.conf"
+publishable "accepts a config the repository already ignores" accepted "kantainer.conf"
+
+# A config outside the repository is the operator's business, not ours.
+config "${WORK}/elsewhere.conf"
+if "${CHECK}" "${WORK}/elsewhere.conf" > /dev/null 2>&1; then
+    ok "accepts a config kept outside the repository"
+else
+    not_ok "accepts a config kept outside the repository"
+fi
 
 ### the repository stays clean
 

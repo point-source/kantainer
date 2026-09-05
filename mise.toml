@@ -1,6 +1,9 @@
 # Tooling for `just ci`. The same versions on the operator's machine and in CI,
-# so a green gate locally means a green gate on a pull request. The gate also
-# uses the system's git, jq and openssl, which are not pinned here.
+# so a green gate locally means a green gate on a pull request.
+#
+# The gate also uses the system's git, jq and openssl, plus python3 and GLib -
+# the tests read the rendered NetworkManager profile back through GLib's own
+# key-file parser rather than trusting the bytes we wrote.
 #
 # Install with: mise install
 

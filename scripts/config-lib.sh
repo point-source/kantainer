@@ -153,4 +153,27 @@ kantainer_validate_config() {
     That range is WPA-PSK's, not ours: the machine's supplicant refuses anything
     outside it."
     fi
+
+    kantainer_refuse_if_publishable "${1:-}"
+}
+
+# This repository is public and the configuration file carries a password in
+# plain text. A copy kept inside the working tree under a name .gitignore does
+# not cover is one `git add .` from being published, and a published password
+# stays published - rotating it means reflashing the machine.
+#
+# git's check-ignore is the verdict. Reimplementing its rules here would be a
+# second copy of someone else's logic, and ours would be the one that goes stale.
+kantainer_refuse_if_publishable() {
+    local path="$1" dir
+    [[ -n "${path}" ]] || return 0
+
+    dir="$(cd "$(dirname "${path}")" && pwd)"
+    git -C "${dir}" rev-parse --show-toplevel > /dev/null 2>&1 || return 0
+    git -C "${dir}" check-ignore -q "${path}" && return 0
+
+    kantainer_fail "${path} is inside this repository and git does not ignore it
+    It carries your Portainer password, and this repository is public. Either add
+    it to .gitignore, or keep it outside the repository and name it:
+        just render config=/path/to/your.conf"
 }

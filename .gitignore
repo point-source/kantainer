@@ -7,4 +7,5 @@ _build-*/**
 # it. Both carry the Portainer password in plain text and this repository is
 # public (REQUIREMENTS.md §req:quality-attributes).
 kantainer.conf
+kantainer*.conf
 *.ign
