@@ -107,7 +107,6 @@ mv /etc/selinux/targeted.rebuilt /etc/selinux/targeted
 # Fedora the store lives under /etc, so the module ships inside the image and
 # needs no first-boot unit to install it.
 semodule --noreload --install /usr/share/selinux/packages/kantainer_portainer.pp
-semodule --list | grep -qx kantainer_portainer
 
 dnf5 -y remove selinux-policy-devel
 
@@ -179,6 +178,13 @@ rm -rf /var/lib/containers
 # and ships correctly; ucore-minimal carries neither of these, so removing them
 # restores the base image's state exactly.
 rm -rf /var/lib/selinux /run/selinux-policy
+
+# Assert AFTER that removal, not before it. Fedora has a standing proposal to
+# move the policy store to /var/lib/selinux; if it ever lands, the line above
+# would delete the real store and the image would ship with Portainer denied the
+# Docker socket - working build, broken machine, no warning anywhere. semodule's
+# own listing is the check.
+semodule --list | grep -qx kantainer_portainer
 
 ### 5. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
 #
