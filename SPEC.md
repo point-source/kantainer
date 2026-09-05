@@ -2,8 +2,11 @@
 
 ## Base image and composition §spec:base-image
 
-*Status: in progress* — the derivation and wireless restoration are built; the Docker
-engine, Portainer and boot-health checking are added by later work. The base is
+*Status: complete* — all four additions are in the built image: the Docker engine
+(§spec:container-engine), Portainer (§spec:portainer-service), wireless support, and
+boot-health checking (§spec:boot-health-and-rollback). Not yet confirmed on real hardware:
+the restored wireless packages are verified as installed, not as associating with a
+network, which needs a machine with an adapter. The base is
 `ghcr.io/ublue-os/ucore-minimal:stable-20260904`, pinned by digest in `Containerfile`
 and recorded in `versions.env`.
 
@@ -529,7 +532,11 @@ Cites §req:success-criteria (8), §req:quality-attributes, §req:priorities.
 
 ## Image publication §spec:image-publication
 
-*Status: complete*
+*Status: complete* — never yet exercised: nothing has been pushed and no image has been
+published, so the build, push, sign and verify sequence is confirmed by reading the workflow
+rather than by watching it run. It also cannot run until `SIGNING_SECRET` holds the private
+half of the committed `cosign.pub` (see the README's Signing section); until then the signing
+step fails by design.
 
 Pushing to the default branch produces a newly built, signed, published kantainer image at
 `ghcr.io/point-source/kantainer` with no manual build step. That published image is what
