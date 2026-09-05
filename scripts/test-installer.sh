@@ -17,6 +17,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FETCH="${REPO_ROOT}/scripts/fetch-installer.sh"
 
 # shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ignition-lib.sh"
+
+# shellcheck source=/dev/null
 . "${REPO_ROOT}/versions.env"
 
 # Must match the name fetch-installer.sh derives from the same pin. Written out
@@ -138,40 +141,11 @@ config() {
     } > "${path}"
 }
 
-# Ignition carries file contents as a data: URL, in one of two forms, and butane
-# compresses anything past a size threshold. Read them back the way Ignition
-# would rather than trusting the bytes we handed it. Same decoding as
-# scripts/test-config.sh, which reads the machine configuration the same way.
-decode() {
-    local source="$1"
-    case "${source}" in
-        "data:;base64,"*)
-            printf '%s' "${source#data:;base64,}" | base64 -d
-            ;;
-        "data:,"*)
-            local body="${source#data:,}"
-            body="${body//\\/\\\\}"
-            printf '%b' "${body//%/\\x}"
-            ;;
-        *)
-            printf '%s' "${source}"
-            ;;
-    esac
-}
-
-file_contents() {
-    local ign="$1" path="$2" source compression
-    source="$(jq -r --arg p "${path}" \
-        '.storage.files[] | select(.path == $p) | .contents.source' < "${ign}")"
-    compression="$(jq -r --arg p "${path}" \
-        '.storage.files[] | select(.path == $p) | .contents.compression // ""' < "${ign}")"
-
-    if [[ "${compression}" == "gzip" ]]; then
-        decode "${source}" | gzip -d
-    else
-        decode "${source}"
-    fi
-}
+# Ignition carries file contents as a data: URL, and butane compresses anything
+# past a size threshold. scripts/ignition-lib.sh undoes both, for this file and
+# for scripts/test-config.sh, so the two cannot disagree about what the machine
+# will actually receive.
+file_contents() { kantainer_ignition_file "$@"; }
 
 config "${WORK}/wired.conf"
 "${RENDER_INSTALLER}" "${WORK}/wired.conf" > "${WORK}/wired.ign"

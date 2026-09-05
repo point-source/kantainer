@@ -17,6 +17,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECK="${REPO_ROOT}/scripts/check-config.sh"
 RENDER="${REPO_ROOT}/scripts/render-ignition.sh"
 
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ignition-lib.sh"
+
 failures=0
 
 # Test material is GENERATED here, never committed. This repository is public
@@ -181,25 +184,6 @@ secrecy
 
 ### render-ignition.sh
 
-# Ignition carries file contents as a data: URL. Both forms appear depending on
-# what is being carried, so both are decoded here.
-decode() {
-    local source="$1"
-    case "${source}" in
-        "data:;base64,"*)
-            printf '%s' "${source#data:;base64,}" | base64 -d
-            ;;
-        "data:,"*)
-            local body="${source#data:,}"
-            body="${body//\\/\\\\}"
-            printf '%b' "${body//%/\\x}"
-            ;;
-        *)
-            printf '%s' "${source}"
-            ;;
-    esac
-}
-
 # Render a valid config with the given overrides into $WORK/out.json. A failure
 # is reported and the run continues: under `set -e` one broken render would
 # otherwise abort the suite and hide every test after it.
@@ -211,21 +195,10 @@ render() {
     fi
 }
 
-# File contents at path $1 in the rendered output, decoded. Butane compresses
-# anything past a size threshold, so the compression field decides whether what
-# comes out of the data: URL is the file or a gzip stream of it.
+# File contents at path $1 in the rendered output, decoded by
+# scripts/ignition-lib.sh - the same reader scripts/test-installer.sh uses.
 file_at() {
-    local path="$1" source compression
-    source="$(jq -r --arg p "${path}" \
-        '.storage.files[] | select(.path == $p) | .contents.source' < "${WORK}/out.json")"
-    compression="$(jq -r --arg p "${path}" \
-        '.storage.files[] | select(.path == $p) | .contents.compression // ""' < "${WORK}/out.json")"
-
-    if [[ "${compression}" == "gzip" ]]; then
-        decode "${source}" | gzip -d
-    else
-        decode "${source}"
-    fi
+    kantainer_ignition_file "${WORK}/out.json" "$1"
 }
 
 # jq expression $1 against the rendered output, expecting $2.
