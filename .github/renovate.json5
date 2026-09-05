@@ -6,6 +6,22 @@
 
   "rebaseWhen": "never",
 
+  // versions.env is not a format Renovate understands natively, but the Portainer
+  // pin has to move: an untracked pin is how a machine stays on a version with a
+  // known authentication bypass. Both halves of the pin are captured in one match
+  // so Renovate rewrites the tag and the digest together - they must never drift.
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "PORTAINER_IMAGE=(?<depName>.*?)\\nPORTAINER_TAG=(?<currentValue>.*?)\\nPORTAINER_DIGEST=(?<currentDigest>.*?)\\n",
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+    },
+  ],
+
   "packageRules": [
     // Pinning action SHAs is mechanical and safe to land unattended.
     {

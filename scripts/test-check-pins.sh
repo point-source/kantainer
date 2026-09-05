@@ -22,6 +22,7 @@ expect() {
     trap 'rm -rf "${tmp}"' RETURN
 
     cp "${REPO_ROOT}/Containerfile" "${REPO_ROOT}/versions.env" "${REPO_ROOT}/cosign.pub" "${tmp}/"
+    cp -r "${REPO_ROOT}/build_files" "${tmp}/"
     ( cd "${tmp}" && eval "${mutate}" )
 
     local got=0
@@ -58,6 +59,12 @@ expect 1 "rejects a missing signing public key" \
 
 expect 1 "rejects a signing public key that is not a public key" \
     "echo 'not a key' > cosign.pub"
+
+expect 1 "rejects a missing Portainer pin" \
+    "sed -i 's/^PORTAINER_DIGEST=.*/PORTAINER_DIGEST=/' versions.env"
+
+expect 1 "rejects a Portainer pin that is not a digest" \
+    "sed -i 's|^PORTAINER_DIGEST=.*|PORTAINER_DIGEST=latest|' versions.env"
 
 echo
 if [[ "${failures}" -eq 0 ]]; then

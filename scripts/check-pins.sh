@@ -26,7 +26,8 @@ fail() {
 # shellcheck source=/dev/null
 . "${ROOT}/versions.env"
 
-for var in UCORE_IMAGE UCORE_TAG UCORE_DIGEST FCOS_STREAM FCOS_VERSION FCOS_ISO_SHA256; do
+for var in UCORE_IMAGE UCORE_TAG UCORE_DIGEST FCOS_STREAM FCOS_VERSION FCOS_ISO_SHA256 \
+    PORTAINER_IMAGE PORTAINER_TAG PORTAINER_DIGEST; do
     [[ -n "${!var:-}" ]] || fail "versions.env does not set ${var}"
 done
 
@@ -63,6 +64,16 @@ from_tag="${from_image_tag##*:}"
     Containerfile: ${from_digest}
     versions.env:  ${UCORE_DIGEST}"
 
+# Portainer is pulled by digest alone - skopeo refuses a reference carrying both
+# a tag and a digest, so the tag beside it is documentation and the digest is the
+# only thing that decides which bytes ship. A digest that is not a digest would
+# quietly become a floating tag, and the image would stop being reproducible.
+case "${PORTAINER_DIGEST}" in
+    sha256:*) ;;
+    *) fail "PORTAINER_DIGEST is not a digest: ${PORTAINER_DIGEST}
+    Portainer is pulled by digest alone. Pin it as sha256:..." ;;
+esac
+
 # A malformed cosign.pub already fails closed at publish time, when the workflow
 # verifies its own signature against it. Checking here buys the same answer on
 # the pull request instead of after merge. It cannot detect the case that
@@ -72,4 +83,4 @@ from_tag="${from_image_tag##*:}"
 openssl pkey -pubin -noout -in "${ROOT}/cosign.pub" 2> /dev/null ||
     fail "cosign.pub does not parse as a public key"
 
-echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}"
+echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}; Portainer ${PORTAINER_TAG} pinned by digest"
