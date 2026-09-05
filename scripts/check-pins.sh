@@ -7,7 +7,10 @@
 #
 #   - the base image is pinned by digest, not just a moving tag
 #   - the Containerfile's FROM and versions.env name the same base image
-#   - versions.env records the Fedora CoreOS release the installer comes from
+#   - versions.env records the Fedora CoreOS release the installer comes from,
+#     as a checksum `just flash` can actually verify a download against
+#   - every pin here is the shape of a pin, rather than a floating tag that
+#     would resolve to something new tomorrow
 #
 # Usage: check-pins.sh [repo-root]
 
@@ -27,9 +30,19 @@ fail() {
 . "${ROOT}/versions.env"
 
 for var in UCORE_IMAGE UCORE_TAG UCORE_DIGEST FCOS_STREAM FCOS_VERSION FCOS_ISO_SHA256 \
-    PORTAINER_IMAGE PORTAINER_TAG PORTAINER_DIGEST; do
+    PORTAINER_IMAGE PORTAINER_TAG PORTAINER_DIGEST \
+    COREOS_INSTALLER_IMAGE COREOS_INSTALLER_TAG COREOS_INSTALLER_DIGEST; do
     [[ -n "${!var:-}" ]] || fail "versions.env does not set ${var}"
 done
+
+# A pin that is not the shape of a pin is a floating tag wearing its name. Both
+# of these are read by tools that would accept the wrong thing quietly: podman
+# resolves a tag, and sha256sum refuses a malformed line by skipping it.
+require_digest() {
+    [[ "${!1}" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        fail "${1} is not a sha256 digest: ${!1}
+    Pin it as sha256: followed by 64 hex characters."
+}
 
 # The base image is the only FROM that is not the scratch build-context stage.
 from_line="$(grep -E '^FROM ' "${ROOT}/Containerfile" | grep -v '^FROM scratch' || true)"
@@ -68,11 +81,17 @@ from_tag="${from_image_tag##*:}"
 # a tag and a digest, so the tag beside it is documentation and the digest is the
 # only thing that decides which bytes ship. A digest that is not a digest would
 # quietly become a floating tag, and the image would stop being reproducible.
-case "${PORTAINER_DIGEST}" in
-    sha256:*) ;;
-    *) fail "PORTAINER_DIGEST is not a digest: ${PORTAINER_DIGEST}
-    Portainer is pulled by digest alone. Pin it as sha256:..." ;;
-esac
+require_digest PORTAINER_DIGEST
+
+# The tool `just flash` personalises the installer with, and the checksum that
+# same command verifies the installer against (SPEC.md §spec:installer-media).
+# A checksum that is not a checksum cannot refuse a corrupted download, and the
+# consequence lands on a USB stick rather than in this gate.
+require_digest COREOS_INSTALLER_DIGEST
+
+[[ "${FCOS_ISO_SHA256}" =~ ^[0-9a-f]{64}$ ]] ||
+    fail "FCOS_ISO_SHA256 is not a sha256 checksum: ${FCOS_ISO_SHA256}
+    It is the bare 64-character digest of the live ISO, with no sha256: prefix."
 
 # The pin is only a pin while the build reads it from here. A digest written
 # straight into build.sh would still produce a working image, so nothing else
@@ -102,4 +121,4 @@ fi
 openssl pkey -pubin -noout -in "${ROOT}/cosign.pub" 2> /dev/null ||
     fail "cosign.pub does not parse as a public key"
 
-echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}; Portainer ${PORTAINER_TAG} pinned by digest"
+echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}; Portainer ${PORTAINER_TAG} and coreos-installer ${COREOS_INSTALLER_TAG} pinned by digest"

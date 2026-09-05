@@ -69,6 +69,18 @@ expect 1 "rejects a Portainer pin that is not a digest" \
 expect 1 "rejects a Portainer digest hardcoded in the build" \
     "sed -i 's|\${PORTAINER_DIGEST}|sha256:0000000000000000000000000000000000000000000000000000000000000000|' build_files/build.sh"
 
+# The Fedora CoreOS pin is what `just flash` verifies the installer against
+# (SPEC.md §spec:installer-media). A checksum that is not a checksum cannot
+# refuse anything, and the refusal would arrive at the operator's USB stick.
+expect 1 "rejects an ISO checksum that is not a sha256" \
+    "sed -i 's|^FCOS_ISO_SHA256=.*|FCOS_ISO_SHA256=notachecksum|' versions.env"
+
+expect 1 "rejects a missing coreos-installer pin" \
+    "sed -i 's|^COREOS_INSTALLER_DIGEST=.*|COREOS_INSTALLER_DIGEST=|' versions.env"
+
+expect 1 "rejects a coreos-installer pin that is not a digest" \
+    "sed -i 's|^COREOS_INSTALLER_DIGEST=.*|COREOS_INSTALLER_DIGEST=release|' versions.env"
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all pin checks behave as intended"
