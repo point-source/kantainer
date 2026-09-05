@@ -96,7 +96,8 @@ fi
 # SPEC.md and REQUIREMENTS.md §req:priorities both turn on this prompt: it is
 # the last thing between the operator and the only unrecoverable failure in the
 # system. It has to say what is about to be erased.
-prompt="$( ( kantainer_confirm_device /dev/sdb "Kingston DataTraveler" 28.9G ) < /dev/null 2>&1 || true )"
+facts disk "Kingston DataTraveler" 28.9G ""
+prompt="$( ( kantainer_confirm_erase /dev/sdb ) < /dev/null 2>&1 || true )"
 for field in "/dev/sdb" "Kingston DataTraveler" "28.9G"; do
     if [[ "${prompt}" == *"${field}"* ]]; then
         ok "the confirmation names ${field}"
@@ -105,7 +106,7 @@ for field in "/dev/sdb" "Kingston DataTraveler" "28.9G"; do
     fi
 done
 
-if printf '/dev/sdb\n' | ( kantainer_confirm_device /dev/sdb Kingston 28.9G ) > /dev/null 2>&1; then
+if printf '/dev/sdb\n' | ( kantainer_confirm_erase /dev/sdb ) > /dev/null 2>&1; then
     ok "goes ahead when the device path is typed back"
 else
     not_ok "goes ahead when the device path is typed back"
@@ -113,22 +114,51 @@ fi
 
 # "yes" is what a person types without reading. The path is what they type after
 # reading it.
-if printf 'yes\n' | ( kantainer_confirm_device /dev/sdb Kingston 28.9G ) > /dev/null 2>&1; then
+if printf 'yes\n' | ( kantainer_confirm_erase /dev/sdb ) > /dev/null 2>&1; then
     not_ok "refuses an answer that is not the device path"
 else
     ok "refuses an answer that is not the device path"
 fi
 
-if printf '/dev/sda\n' | ( kantainer_confirm_device /dev/sdb Kingston 28.9G ) > /dev/null 2>&1; then
+if printf '/dev/sda\n' | ( kantainer_confirm_erase /dev/sdb ) > /dev/null 2>&1; then
     not_ok "refuses a different device path"
 else
     ok "refuses a different device path"
 fi
 
-if ( kantainer_confirm_device /dev/sdb Kingston 28.9G ) < /dev/null > /dev/null 2>&1; then
+if ( kantainer_confirm_erase /dev/sdb ) < /dev/null > /dev/null 2>&1; then
     not_ok "refuses when nobody answers"
 else
     ok "refuses when nobody answers"
+fi
+
+### the confirmation describes the device NOW, not when the command started
+
+# Minutes pass between the first look at the device and this prompt: a 1.3 GB
+# download and a container that rebuilds the ISO. A stick pulled out in that
+# window - or a flaky port - frees its name for whatever is plugged in next, and
+# the kernel hands it straight back. Showing what lsblk said at the start would
+# describe a device that is no longer there, and the operator would confirm it.
+facts disk "WD My Book BACKUP" 4.0T ""
+prompt="$( ( kantainer_confirm_erase /dev/sdb ) < /dev/null 2>&1 || true )"
+if [[ "${prompt}" == *"WD My Book BACKUP"* && "${prompt}" != *"Kingston"* ]]; then
+    ok "the confirmation describes the device as it is when it asks"
+else
+    not_ok "the confirmation describes the device as it is when it asks"
+fi
+
+# The stick was pulled out and nothing took its name. There is nothing to
+# describe, so there is nothing to confirm.
+facts "" "" "" ""
+if err="$( ( kantainer_confirm_erase /dev/sdb ) < /dev/null 2>&1 )"; then
+    not_ok "refuses rather than asking about a device that is gone"
+else
+    ok "refuses rather than asking about a device that is gone"
+fi
+if [[ "${err}" != *"ABOUT TO ERASE"* ]]; then
+    ok "does not prompt at all when the device is gone"
+else
+    not_ok "does not prompt at all when the device is gone"
 fi
 
 ### the command as the operator runs it

@@ -72,8 +72,25 @@ kantainer_check_device() {
 # back rather than answered with yes: REQUIREMENTS.md §req:priorities calls
 # erasing the wrong drive the only failure in this system that cannot be undone,
 # and re-reading the path is what catches the one the operator meant.
-kantainer_confirm_device() {
-    local device="$1" model="$2" size="$3" answer
+#
+# THE DEVICE IS READ AGAIN HERE, not carried down from the check at the start of
+# the command. Minutes pass in between - a 1.3 GB download and a container that
+# rebuilds the ISO - and a stick pulled out in that window frees its name for
+# whatever is plugged in next, which the kernel hands straight back. Describing
+# what lsblk said at the start would put the operator's own stick on the screen
+# while dd wrote to the drive that inherited the name. Same objective verdict,
+# read at the moment it is used.
+kantainer_confirm_erase() {
+    local device="$1" facts model size answer
+
+    # Tested, not assumed: kantainer_fail exits, but inside a command
+    # substitution that only kills the subshell. Without this the caller sails
+    # on and asks the operator to confirm erasing a device that is not there,
+    # with an empty model and size where the answer should be.
+    if ! facts="$(kantainer_check_device "${device}")"; then
+        exit 1
+    fi
+    IFS=$'\t' read -r model size <<< "${facts}"
 
     {
         echo
@@ -103,7 +120,7 @@ kantainer_as_root() {
 
 main() {
     local device="${1-}" config="${2:-kantainer.conf}"
-    local facts model size iso staging
+    local iso staging
 
     [[ -n "${device}" ]] ||
         kantainer_fail "no device given.
@@ -114,8 +131,9 @@ main() {
     kantainer_load_config "${config}"
     kantainer_validate_config "${config}"
 
-    facts="$(kantainer_check_device "${device}")"
-    IFS=$'\t' read -r model size <<< "${facts}"
+    # Fail fast on a path that could never work, before spending a download on
+    # it. What the operator is shown and confirms is read again below.
+    kantainer_check_device "${device}" > /dev/null
 
     command -v podman > /dev/null ||
         kantainer_fail "podman is not on PATH.
@@ -150,7 +168,7 @@ main() {
         --output "/out/installer.iso" \
         "/iso/$(basename "${iso}")"
 
-    kantainer_confirm_device "${device}" "${model}" "${size}"
+    kantainer_confirm_erase "${device}"
 
     echo "flash: writing to ${device}" >&2
     kantainer_as_root dd \
