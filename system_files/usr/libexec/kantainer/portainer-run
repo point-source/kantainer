@@ -36,8 +36,12 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 # No --restart flag: systemd owns this container's lifecycle. Two supervisors
 # over one container is a fight nobody wins. Containers the operator deploys
 # through Portainer keep using Docker's own restart policy.
+# --security-opt label=type: is what opts this one container into the domain the
+# policy module defines. Without it Portainer would run as container_t, which is
+# every container on the machine and deliberately has no access to the socket.
 exec /usr/bin/docker run --rm --name kantainer-portainer \
     --publish 9443:9443 \
+    --security-opt label=type:kantainer_portainer_t \
     --volume /run/docker.sock:/var/run/docker.sock \
     --volume /var/lib/portainer:/data \
     --volume /run/kantainer/portainer-admin-password:/run/portainer-admin-password:ro \

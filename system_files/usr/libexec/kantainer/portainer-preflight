@@ -47,8 +47,9 @@ install -d -m 0700 "${STAGED_DIR}"
 install -m 0600 /dev/null "${STAGED}"
 cat "${PASSWORD_FILE}" > "${STAGED}"
 
-# Label the copy so the Portainer container may read it. Skipped when SELinux is
-# off, where there is nothing to label and chcon fails.
+# Label the copy with Portainer's own type, so Portainer can read it and no
+# other container can. Skipped when SELinux is off, where there is nothing to
+# label and chcon would fail.
 if selinuxenabled; then
-    chcon -t container_file_t "${STAGED}"
+    chcon -t kantainer_portainer_file_t "${STAGED}"
 fi

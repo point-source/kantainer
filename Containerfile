@@ -3,6 +3,7 @@
 FROM scratch AS ctx
 COPY build_files /
 COPY system_files /system_files
+COPY selinux /selinux
 COPY cosign.pub /cosign.pub
 COPY image.env /image.env
 COPY versions.env /versions.env

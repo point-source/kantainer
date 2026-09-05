@@ -1,0 +1,40 @@
+## Portainer's SELinux domain (SPEC.md §spec:portainer-service).
+##
+## Portainer holds the Docker control socket, which is root-equivalent access to
+## the machine. Reaching that socket from inside a container needs an exemption
+## from the machine's mandatory access control. This module is that exemption,
+## and nothing more: the rest of the machine stays Enforcing.
+##
+## Two permissions are missing from the shipped policy and only two are added:
+## writing the socket file, and connecting to the daemon behind it. Both come
+## from container_stream_connect(), which container-selinux maintains for exactly
+## this purpose - the rules are not written out here, so they stay correct as
+## upstream changes them.
+##
+## Why a domain of its own rather than granting container_t: container_t is every
+## container on the machine. Granting it there would hand the Docker socket to
+## anything the operator ever deploys through Portainer, which is broader than
+## running Portainer with full privileges - the thing §spec:portainer-service
+## rejected. kantainer-portainer.service opts this one container in with
+## --security-opt label=type:kantainer_portainer_t; nothing else can.
+
+policy_module(kantainer_portainer, 1.0.0)
+
+gen_require(`
+	attribute container_domain;
+	attribute container_file_type;
+	type container_runtime_t;
+')
+
+# Portainer's persistent data under /var/lib/portainer, and the staged
+# administrator password. Its own type, so no other container can read either.
+type kantainer_portainer_file_t;
+container_file(kantainer_portainer_file_t)
+
+container_domain_template(kantainer_portainer, kantainer_portainer)
+
+# Docker starts containers with NoNewPrivileges, which needs this transition.
+container_runtime_typebounds(kantainer_portainer_t)
+
+# The exemption itself.
+container_stream_connect(kantainer_portainer_t)

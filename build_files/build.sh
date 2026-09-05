@@ -81,6 +81,36 @@ skopeo copy --quiet \
 printf '%s\n' "${PORTAINER_REF}" > /usr/lib/kantainer/portainer-image
 chmod 0644 /usr/lib/kantainer/portainer-image
 
+# Portainer's SELinux domain (SPEC.md §spec:portainer-service)
+#
+# selinux-policy-devel carries the refpolicy interfaces and the build Makefile.
+# It is removed again below: it is a build tool, and the installed machine has
+# no use for it.
+dnf5 -y install selinux-policy-devel
+# /ctx is mounted read-only and the Makefile writes beside its source, so the
+# policy is built in /tmp (a tmpfs for this build).
+mkdir -p /tmp/selinux
+cp /ctx/selinux/kantainer_portainer.te /ctx/selinux/kantainer_portainer.fc /tmp/selinux/
+make -C /tmp/selinux -f /usr/share/selinux/devel/Makefile kantainer_portainer.pp
+install -Dpm 0644 /tmp/selinux/kantainer_portainer.pp \
+    /usr/share/selinux/packages/kantainer_portainer.pp
+
+# Force /etc/selinux/targeted fully into this layer before touching the policy
+# store. uCore does the same in its nvidia layer: the store transaction renames
+# directories, and across an overlayfs layer boundary those intermittently fail
+# with EXDEV or ENOTEMPTY.
+cp -a /etc/selinux/targeted /etc/selinux/targeted.rebuilt
+rm -rf /etc/selinux/targeted
+mv /etc/selinux/targeted.rebuilt /etc/selinux/targeted
+
+# --noreload because there is no kernel policy to reload inside a build. On
+# Fedora the store lives under /etc, so the module ships inside the image and
+# needs no first-boot unit to install it.
+semodule --noreload --install /usr/share/selinux/packages/kantainer_portainer.pp
+semodule --list | grep -qx kantainer_portainer
+
+dnf5 -y remove selinux-policy-devel
+
 ### 3. Services (SPEC.md §spec:container-engine)
 #
 # Docker runs from first boot. ucore-minimal ships moby-engine - it comes from
@@ -142,6 +172,13 @@ rm -rf /var/lib/dnf /run/dnf
 # bookkeeping about which blobs were pulled - useless on the installed machine,
 # and it trips var-tmpfiles for the same reason.
 rm -rf /var/lib/containers
+
+# semodule leaves a mirror of the policy store under /var/lib/selinux and its
+# working files under /run/selinux-policy. The store this machine actually reads
+# is /etc/selinux (semanage.conf sets store-root there), which is image content
+# and ships correctly; ucore-minimal carries neither of these, so removing them
+# restores the base image's state exactly.
+rm -rf /var/lib/selinux /run/selinux-policy
 
 ### 5. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
 #

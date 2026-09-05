@@ -1,0 +1,4 @@
+# Portainer's settings, certificate and stack definitions. Labelled with its own
+# type so that only Portainer's domain can read them - systemd-tmpfiles applies
+# this when it creates the directory at boot.
+/var/lib/portainer(/.*)?	gen_context(system_u:object_r:kantainer_portainer_file_t,s0)
