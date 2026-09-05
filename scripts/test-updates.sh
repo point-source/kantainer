@@ -75,7 +75,6 @@ timespan_seconds() {
         *h) echo $(( ${span%h} * 3600 )) ;;
         *min) echo $(( ${span%min} * 60 )) ;;
         *s) echo "${span%s}" ;;
-        '') echo 0 ;;
         *[!0-9]*) return 1 ;;
         *) echo "${span}" ;;
     esac
@@ -201,34 +200,26 @@ STUBEOF
     fi
 }
 
-if [[ -x "${PREFLIGHT}" ]]; then
-    preflight_with "the preflight allows an update the signing policy governs" 0 0 \
-        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":"containerPolicy"}}}}}'
+preflight_with "the preflight allows an update the signing policy governs" 0 0 \
+    '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":"containerPolicy"}}}}}'
 
-    preflight_with "the preflight refuses when nothing verifies the signature" 1 0 \
-        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest"}}}}}'
+preflight_with "the preflight refuses when nothing verifies the signature" 1 0 \
+    '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest"}}}}}'
 
-    # An ostree remote's GPG key is a different signing arrangement from the
-    # cosign key this repository publishes with. Verified by something other
-    # than our policy is not verified by our policy.
-    preflight_with "the preflight refuses a signing arrangement that is not ours" 1 0 \
-        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":{"ostreeRemote":"fedora"}}}}}}'
+# An ostree remote's GPG key is a different signing arrangement from the cosign
+# key this repository publishes with. Verified by something other than our
+# policy is not verified by our policy.
+preflight_with "the preflight refuses a signing arrangement that is not ours" 1 0 \
+    '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":{"ostreeRemote":"fedora"}}}}}}'
 
-    preflight_with "the preflight refuses when bootc cannot report status" 1 1 \
-        ''
+preflight_with "the preflight refuses when bootc cannot report status" 1 1 \
+    ''
 
-    # If a later bootc renames or moves the field, the query stops matching. The
-    # only safe direction for that is refusing: updates stop and say why, rather
-    # than continuing unverified while the check quietly passes everything.
-    preflight_with "the preflight refuses a status shape it does not recognise" 1 0 \
-        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signatureMode":"containerPolicy"}}}}}'
-else
-    not_ok "the preflight allows an update the signing policy governs"
-    not_ok "the preflight refuses when nothing verifies the signature"
-    not_ok "the preflight refuses a signing arrangement that is not ours"
-    not_ok "the preflight refuses when bootc cannot report status"
-    not_ok "the preflight refuses a status shape it does not recognise"
-fi
+# If a later bootc renames or moves the field, the query stops matching. The
+# only safe direction for that is refusing: updates stop and say why, rather
+# than continuing unverified while the check quietly passes everything.
+preflight_with "the preflight refuses a status shape it does not recognise" 1 0 \
+    '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signatureMode":"containerPolicy"}}}}}'
 
 ### The boot health check (§spec:boot-health-and-rollback)
 
@@ -289,13 +280,8 @@ STUBEOF
     fi
 }
 
-if [[ -x "${HEALTH_CHECK}" ]]; then
-    health_check_with "the health check passes while Docker is running" 0 0
-    health_check_with "the health check fails while Docker is not running" 1 3
-else
-    not_ok "the health check passes while Docker is running"
-    not_ok "the health check fails while Docker is not running"
-fi
+health_check_with "the health check passes while Docker is running" 0 0
+health_check_with "the health check fails while Docker is not running" 1 3
 
 ### The GRUB boot counter (§spec:boot-health-and-rollback)
 
@@ -352,85 +338,72 @@ seed_case() {
     return 1
 }
 
-if [[ -x "${SEED}" ]]; then
-    # The qcow2 path: bootupd already assembled greenboot's snippet into
-    # grub.cfg. Writing custom.cfg too would decrement the counter TWICE per
-    # boot, rolling the machine back after two failed boots instead of three.
-    # GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
-    # variables and must reach the file unexpanded.
-    # shellcheck disable=SC2016
-    if seed_case "the seed leaves a bootloader that already counts boots alone" 0 \
-        'insmod increment
+# The qcow2 path: bootupd already assembled greenboot's snippet into
+# grub.cfg. Writing custom.cfg too would decrement the counter TWICE per
+# boot, rolling the machine back after two failed boots instead of three.
+# GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
+# variables and must reach the file unexpanded.
+# shellcheck disable=SC2016
+if seed_case "the seed leaves a bootloader that already counts boots alone" 0 \
+    'insmod increment
 if [ -n "${boot_counter}" -a "${boot_success}" = "0" ]; then
   decrement boot_counter
 fi'; then
-        refute "the seed writes nothing when the counter is already there" \
-            test -e "${SEED_DIR}/grub2/custom.cfg"
-        rm -rf "${SEED_DIR}"
-    else
-        not_ok "the seed writes nothing when the counter is already there"
-    fi
+    refute "the seed writes nothing when the counter is already there" \
+        test -e "${SEED_DIR}/grub2/custom.cfg"
+    rm -rf "${SEED_DIR}"
+else
+    not_ok "the seed writes nothing when the counter is already there"
+fi
 
-    # The real machines: FCOS's grub.cfg, whose only extension point is the
-    # custom.cfg that bootupd's own 41_custom.cfg sources.
-    # GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
-    # variables and must reach the file unexpanded.
-    # shellcheck disable=SC2016
-    if seed_case "the seed installs the counter through the bootloader's own seam" 0 \
-        'if [ -f $prefix/custom.cfg ]; then
+# The real machines: FCOS's grub.cfg, whose only extension point is the
+# custom.cfg that bootupd's own 41_custom.cfg sources.
+# GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
+# variables and must reach the file unexpanded.
+# shellcheck disable=SC2016
+if seed_case "the seed installs the counter through the bootloader's own seam" 0 \
+    'if [ -f $prefix/custom.cfg ]; then
   source $prefix/custom.cfg
 fi'; then
-        assert "the seed writes greenboot's snippet, not its own copy of it" \
-            grep -qxF 'set boot_success=0' "${SEED_DIR}/grub2/custom.cfg"
+    assert "the seed writes greenboot's snippet, not its own copy of it" \
+        grep -qxF 'set boot_success=0' "${SEED_DIR}/grub2/custom.cfg"
 
-        # Running every boot, it must not churn /boot on a machine that is
-        # already correct.
-        before="$(cat "${SEED_DIR}/grub2/custom.cfg")"
-        "${SEED}" "${SEED_DIR}/grub2" "${SEED_DIR}/snippet.cfg" > /dev/null 2>&1 || true
-        if [[ "${before}" == "$(cat "${SEED_DIR}/grub2/custom.cfg")" ]]; then
-            ok "the seed is unchanged by running twice"
-        else
-            not_ok "the seed is unchanged by running twice"
-        fi
-        rm -rf "${SEED_DIR}"
+    # Running every boot, it must not churn /boot on a machine that is
+    # already correct.
+    before="$(cat "${SEED_DIR}/grub2/custom.cfg")"
+    "${SEED}" "${SEED_DIR}/grub2" "${SEED_DIR}/snippet.cfg" > /dev/null 2>&1 || true
+    if [[ "${before}" == "$(cat "${SEED_DIR}/grub2/custom.cfg")" ]]; then
+        ok "the seed is unchanged by running twice"
     else
-        not_ok "the seed writes greenboot's snippet, not its own copy of it"
         not_ok "the seed is unchanged by running twice"
     fi
-
-    # No counter and no seam. Writing custom.cfg would achieve nothing, and
-    # exiting 0 would report a rollback this machine does not have. A failed
-    # unit is the only honest outcome.
-    seed_case "the seed fails loudly when the bootloader has no seam to use" 1 \
-        'blscfg' && rm -rf "${SEED_DIR}"
-
-    # greenboot ships the snippet; if it is not there, greenboot is not there,
-    # and nothing about rollback works. Say which file is missing rather than
-    # letting cp say it.
-    seed_missing="$(mktemp -d)"
-    mkdir -p "${seed_missing}/grub2"
-    # shellcheck disable=SC2016
-    printf 'source $prefix/custom.cfg\n' > "${seed_missing}/grub2/grub.cfg"
-    got=0
-    "${SEED}" "${seed_missing}/grub2" "${seed_missing}/absent.cfg" > /dev/null 2>&1 || got=$?
-    if [[ "${got}" -eq 1 ]]; then
-        ok "the seed fails when greenboot's snippet is missing"
-    else
-        not_ok "the seed fails when greenboot's snippet is missing (wanted exit 1, got ${got})"
-    fi
-    rm -rf "${seed_missing}"
+    rm -rf "${SEED_DIR}"
 else
-    for missing in \
-        "the seed leaves a bootloader that already counts boots alone" \
-        "the seed writes nothing when the counter is already there" \
-        "the seed installs the counter through the bootloader's own seam" \
-        "the seed writes greenboot's snippet, not its own copy of it" \
-        "the seed is unchanged by running twice" \
-        "the seed fails loudly when the bootloader has no seam to use" \
-        "the seed fails when greenboot's snippet is missing"; do
-        not_ok "${missing}"
-    done
+    not_ok "the seed writes greenboot's snippet, not its own copy of it"
+    not_ok "the seed is unchanged by running twice"
 fi
+
+# No counter and no seam. Writing custom.cfg would achieve nothing, and
+# exiting 0 would report a rollback this machine does not have. A failed
+# unit is the only honest outcome.
+seed_case "the seed fails loudly when the bootloader has no seam to use" 1 \
+    'blscfg' && rm -rf "${SEED_DIR}"
+
+# greenboot ships the snippet; if it is not there, greenboot is not there,
+# and nothing about rollback works. Say which file is missing rather than
+# letting cp say it.
+seed_missing="$(mktemp -d)"
+mkdir -p "${seed_missing}/grub2"
+# shellcheck disable=SC2016
+printf 'source $prefix/custom.cfg\n' > "${seed_missing}/grub2/grub.cfg"
+got=0
+"${SEED}" "${seed_missing}/grub2" "${seed_missing}/absent.cfg" > /dev/null 2>&1 || got=$?
+if [[ "${got}" -eq 1 ]]; then
+    ok "the seed fails when greenboot's snippet is missing"
+else
+    not_ok "the seed fails when greenboot's snippet is missing (wanted exit 1, got ${got})"
+fi
+rm -rf "${seed_missing}"
 
 ### Data durability across updates (§spec:os-updates)
 #
