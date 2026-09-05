@@ -40,32 +40,41 @@ trap 'rm -rf "${STAGING}"' EXIT
 printf '%s' "${KANTAINER_PORTAINER_PASSWORD}" > "${STAGING}/portainer-admin-password"
 
 # Values that do go into the Butane text are quoted by jq as JSON strings, which
-# YAML accepts verbatim. Hand-rolled quoting is how a key with a space or a
-# name with a colon turns into a config that is valid YAML and means something
-# other than what the operator wrote.
+# YAML accepts verbatim. Hand-rolled quoting is how a key with a space or a name
+# with a colon turns into a config that is valid YAML and means something other
+# than what the operator wrote.
 yaml_string() {
     jq -Rn --arg value "$1" '$value'
 }
 
+# Placeholders are filled by bash parameter expansion, not sed or awk. An SSH
+# key comment is free text, and both of those tools reserve characters in
+# replacement position - & is the whole match, \ starts an escape - so a key
+# comment containing them comes out mangled or breaks the expression outright.
+# Bash substitutes the replacement literally.
+fill() {
+    local text="$1" placeholder="$2" value="$3"
+    printf '%s' "${text//"${placeholder}"/"${value}"}"
+}
+
 BUTANE="${STAGING}/kantainer.bu"
 
-sed \
-    -e "s|@@USERNAME@@|$(yaml_string "${KANTAINER_USERNAME}")|" \
-    -e "s|@@SSH_PUBLIC_KEY@@|$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")|" \
-    "${REPO_ROOT}/butane/kantainer.bu.tmpl" > "${BUTANE}"
+template="$(< "${REPO_ROOT}/butane/kantainer.bu.tmpl")"
+template="$(fill "${template}" "@@USERNAME@@" "$(yaml_string "${KANTAINER_USERNAME}")")"
+template="$(fill "${template}" "@@SSH_PUBLIC_KEY@@" "$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")")"
+printf '%s\n' "${template}" > "${BUTANE}"
 
 # The wireless profile exists only when the operator named a network. A wired
 # machine carries no wireless configuration at all (§spec:network-attachment),
 # and wired DHCP needs none.
 if [[ -n "${KANTAINER_WIFI_SSID}" ]]; then
-    # Keyfile values run to the end of the line, so the SSID and passphrase are
-    # written literally. They are placed with awk rather than sed because a
-    # passphrase may contain any character, including sed's delimiters and
-    # backreferences.
-    awk -v ssid="${KANTAINER_WIFI_SSID}" -v psk="${KANTAINER_WIFI_PASSPHRASE}" '
-        { sub(/@@SSID@@/, ssid); sub(/@@PSK@@/, psk); print }
-    ' "${REPO_ROOT}/butane/wireless.nmconnection.tmpl" \
-        > "${STAGING}/kantainer-wireless.nmconnection"
+    # Keyfile values run to the end of the line, so the SSID and passphrase go in
+    # literally - and for the same reason as above, by parameter expansion. A
+    # WPA passphrase is any printable character, & and \ among them.
+    profile="$(< "${REPO_ROOT}/butane/wireless.nmconnection.tmpl")"
+    profile="$(fill "${profile}" "@@SSID@@" "${KANTAINER_WIFI_SSID}")"
+    profile="$(fill "${profile}" "@@PSK@@" "${KANTAINER_WIFI_PASSPHRASE}")"
+    printf '%s\n' "${profile}" > "${STAGING}/kantainer-wireless.nmconnection"
 
     cat "${REPO_ROOT}/butane/wireless.bu.tmpl" >> "${BUTANE}"
 fi

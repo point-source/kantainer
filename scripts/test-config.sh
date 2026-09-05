@@ -284,6 +284,44 @@ else
     not_ok "the profile carries the passphrase verbatim"
 fi
 
+### values that are hostile to a templating engine
+
+# An SSH key comment and a WPA passphrase are free text. Both can contain the
+# characters sed and awk reserve in replacement position - & is the whole match,
+# \ starts an escape - and a value mangled there is not a syntax error: it is a
+# key the machine will not accept, or a passphrase it cannot associate with,
+# discovered in person.
+ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C 'a&b\c|d%e' < /dev/null
+AWKWARD_KEY="$(cat "${WORK}/awkward.pub")"
+AWKWARD_PSK='pass&word\slash|pipe%pct'
+AWKWARD_SSID='net&work\one'
+
+render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
+    "KANTAINER_WIFI_SSID=${AWKWARD_SSID}" "KANTAINER_WIFI_PASSPHRASE=${AWKWARD_PSK}"
+
+assert_jq "an SSH key comment containing & \\ | % survives intact" \
+    '.passwd.users[0].sshAuthorizedKeys[0]' "${AWKWARD_KEY}"
+
+profile="$(file_at /etc/NetworkManager/system-connections/kantainer-wireless.nmconnection)"
+if [[ "${profile}" == *"ssid=${AWKWARD_SSID}"* ]]; then
+    ok "an SSID containing & and \\ survives intact"
+else
+    not_ok "an SSID containing & and \\ survives intact"
+fi
+if [[ "${profile}" == *"psk=${AWKWARD_PSK}"* ]]; then
+    ok "a passphrase containing & \\ | % survives intact"
+else
+    not_ok "a passphrase containing & \\ | % survives intact"
+fi
+
+AWKWARD_PASSWORD='p&ss\w|rd%123'
+render "KANTAINER_PORTAINER_PASSWORD=${AWKWARD_PASSWORD}"
+if [[ "$(file_at /etc/kantainer/portainer-admin-password)" == "${AWKWARD_PASSWORD}" ]]; then
+    ok "a Portainer password containing & \\ | % survives intact"
+else
+    not_ok "a Portainer password containing & \\ | % survives intact"
+fi
+
 ### refusals
 
 # The renderer applies the validator's rules, so `just render` and `just flash`
