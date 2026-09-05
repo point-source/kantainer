@@ -9,11 +9,18 @@
 # That drift is silent, and the reader who trips over it is the one who knows
 # least about the repository.
 #
-# Three checks, all decidable from what the repository holds:
+# Four checks, all decidable from what the repository holds:
 #
 #   1. every `just <recipe>` named in a code span or code block is a real recipe
 #   2. every repository path named in code resolves to a file that exists
-#   3. every relative markdown link resolves to a file that exists
+#   3. every kantainer-*.service and KANTAINER_* field named in code is one this
+#      repository defines
+#   4. every relative markdown link resolves to a file that exists
+#
+# Check 3 covers only the names this repository OWNS. `docker.service` and
+# `bootc-fetch-apply-updates.service` come from the base image, and asserting
+# anything about them here would be our copy of someone else's judgement - the
+# copy that goes stale.
 #
 # It does NOT lint prose, check ports, or follow URLs. Ports and first-boot
 # behaviour are checked by reading, because no test here can reach the machine.
@@ -143,7 +150,44 @@ check_paths() {
     done
 }
 
-### 3. Relative links
+### 3. Names this repository owns
+
+# Unit names and configuration fields are named a dozen times across these
+# documents and are exactly as rename-prone as a recipe. Both are exact matches
+# against a file in this repository, so there is no guessing involved.
+check_owned_names() {
+    local root="$1" file unit field
+
+    for file in $(kantainer_doc_files "${root}"); do
+        while read -r unit; do
+            [[ -n "${unit}" ]] || continue
+            # Ours are defined either as a file in system_files or as a unit in
+            # one of the Ignition templates.
+            if [[ ! -e "${REPO_ROOT}/system_files/usr/lib/systemd/system/${unit}" ]] &&
+                ! grep -rq "name: ${unit}" "${REPO_ROOT}/butane/"; then
+                note_failure "${file} names ${unit}, which this repository does not define"
+            fi
+        done < <(
+            kantainer_code_text "${root}/${file}" |
+                grep -oE 'kantainer-[a-z0-9-]+\.service' |
+                sort -u
+        )
+
+        while read -r field; do
+            [[ -n "${field}" ]] || continue
+            # scripts/config-lib.sh is the authoritative list: it declares the
+            # fields and the bounds the documentation quotes.
+            grep -qw "${field}" "${REPO_ROOT}/scripts/config-lib.sh" ||
+                note_failure "${file} names ${field}, which is not a configuration field"
+        done < <(
+            kantainer_code_text "${root}/${file}" |
+                grep -oE 'KANTAINER_[A-Z0-9_]+' |
+                sort -u
+        )
+    done
+}
+
+### 4. Relative links
 
 check_links() {
     local root="$1" file target resolved
@@ -170,6 +214,7 @@ check_links() {
 
 check_recipes "${REPO_ROOT}"
 check_paths "${REPO_ROOT}"
+check_owned_names "${REPO_ROOT}"
 check_links "${REPO_ROOT}"
 
 if [[ "${failures}" -eq 0 ]]; then
@@ -184,7 +229,7 @@ fi
 
 expect_caught() {
     local name="$1" doc="$2" want="$3"
-    local tmp before=0 caught
+    local tmp caught
 
     tmp="$(mktemp -d)"
     trap 'rm -rf "${tmp}"' RETURN
@@ -192,9 +237,9 @@ expect_caught() {
     printf '%s\n' "${doc}" > "${tmp}/docs/scratch.md"
     : > "${tmp}/README.md"
 
-    before="${failures}"
-    caught="$( check_recipes "${tmp}"; check_paths "${tmp}"; check_links "${tmp}" )"
-    failures="${before}"
+    # A command substitution runs in a subshell, so note_failure's increment
+    # lands there and dies with it. Nothing to save and restore.
+    caught="$( check_recipes "${tmp}"; check_paths "${tmp}"; check_owned_names "${tmp}"; check_links "${tmp}" )"
 
     if grep -q "${want}" <<< "${caught}"; then
         echo "ok       - ${name}"
@@ -214,6 +259,14 @@ expect_caught "a renamed script is caught" \
 expect_caught "a glob that matches nothing is caught" \
     'The templates are `butane/*.definitely-not-an-extension`.' \
     'matches nothing'
+
+expect_caught "a renamed unit is caught" \
+    'Then run `systemctl status kantainer-definitely-not-a-unit.service`.' \
+    'does not define'
+
+expect_caught "a renamed configuration field is caught" \
+    'Set `KANTAINER_DEFINITELY_NOT_A_FIELD` in your configuration.' \
+    'not a configuration field'
 
 expect_caught "a broken link is caught" \
     'See [the thing](definitely-not-a-file.md).' \
