@@ -218,10 +218,9 @@ Cites §req:quality-attributes, §req:constraints, §req:success-criteria (3).
 
 ## Container engine §spec:container-engine
 
-*Status: built, not yet booted* — Docker is enabled and the firewall is narrowed in the
-image. Both were verified by inspecting the built image and by firewalld's own
-`firewall-offline-cmd --check-config`; neither has been confirmed on a booted machine,
-because the build environment has no virtualisation.
+*Status: complete* — not yet confirmed on real hardware: the build environment has no
+virtualisation, so `systemctl is-active` and the firewall's runtime behaviour remain
+unobserved.
 
 Docker runs from first boot and restarts with the machine. It is the engine Portainer
 manages and the engine the operator's containers run under. Containers set to restart
@@ -246,16 +245,15 @@ The firewall is closed by default and opened to two ports because §req:constrai
 exposing Portainer to the internet and §req:quality-attributes calls for minimality; a
 container host that answers on ports nothing uses is a larger target for no benefit.
 
-Two consequences of that narrowing are worth stating plainly. The base platform's default
-zone also accepts DHCPv6 and Cockpit; both are dropped, and dropping DHCPv6 means a network
-that hands out IPv6 addresses by DHCPv6 will not address this machine. IPv4 DHCP and IPv6
-SLAAC are unaffected, and §req:quality-attributes scopes the target to a home network that
-assigns addresses automatically, which is IPv4 in practice.
+Narrowing the base platform's default zone also drops DHCPv6 and Cockpit. Dropping DHCPv6
+means a network that hands out IPv6 addresses that way will not address this machine; IPv4
+DHCP and IPv6 SLAAC are unaffected, and §req:quality-attributes scopes the target to a home
+network that assigns addresses automatically, which is IPv4 in practice.
 
-The second is a limit on what the firewall can promise. A published container port is
+The firewall also cannot promise as much as it appears to. A published container port is
 translated and forwarded rather than delivered to the host, so it never meets these rules:
-the firewall governs what the machine itself listens on, not what Portainer publishes on the
-operator's behalf. Portainer's own agent-tunnel and plain-HTTP interfaces are closed by not
+the firewall governs what the machine itself listens on, not what is published on the
+operator's behalf. Portainer's agent-tunnel and plain-HTTP interfaces are closed by not
 publishing them, not by the firewall.
 
 **Alternatives rejected.** Running Portainer's workloads under Podman was rejected: the
@@ -273,13 +271,9 @@ Cites §req:problem-statement, §req:success-criteria (5), §req:quality-attribu
 
 ## Portainer service §spec:portainer-service
 
-*Status: built, not yet booted* — the image carries Portainer, loads it into Docker at
-boot, serves it on 9443 with the administrator pre-seeded, and confines it to its own
-SELinux domain. Everything except SELinux enforcement and systemd's own ordering was
-verified by running the shipped scripts against the archive the built image carries: the
-login page rather than a setup screen, login with the configured password, the local Docker
-environment already connected, the certificate reused across a restart, and nothing pulled.
-SELinux enforcement needs an enforcing kernel, which the build environment does not have.
+*Status: complete* — not yet confirmed on real hardware: SELinux enforcement needs an
+enforcing kernel, and systemd's unit ordering needs a boot, neither of which the build
+environment has.
 
 Portainer is part of the image. It is present on disk before the machine ever boots and is
 never downloaded onto the machine. It starts automatically, after Docker is available, and
