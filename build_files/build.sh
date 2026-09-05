@@ -75,6 +75,20 @@ dnf5 -y install \
 # invokes it.
 systemctl enable docker.service
 
+# The firewall (SPEC.md §spec:container-engine). firewalld is already installed
+# and already enabled in ucore-minimal, so there is nothing to switch on - only
+# to narrow. The zone itself ships in system_files as an image-owned file; all
+# that is left is to make it the default, because DefaultZone lives in
+# firewalld.conf and has no /usr/lib fallback. uCore writes this same file (it
+# copies firewalld-server.conf over it), so editing it in place stays consistent
+# with the base.
+#
+# firewall-offline-cmd would generate the zone instead, and does work without
+# dbus, but it writes into /etc/firewalld/zones - local customisation territory,
+# not the image's.
+sed -i 's|^DefaultZone=.*|DefaultZone=kantainer|' /etc/firewalld/firewalld.conf
+grep -q '^DefaultZone=kantainer$' /etc/firewalld/firewalld.conf
+
 ### 4. Cleanup
 #
 # uCore's own cleanup does not run for this layer, and `dnf5 clean all` leaves
