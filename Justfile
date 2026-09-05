@@ -391,9 +391,9 @@ spawn-vm rebuild="0" type="qcow2" ram="6G":
 # Check the operator's configuration and say what machine it describes
 [group('Operator')]
 config-check config="kantainer.conf":
-    @./scripts/check-config.sh {{ config }}
+    @./scripts/check-config.sh "{{ config }}"
 
 # Print the machine specification rendered from that configuration
 [group('Operator')]
 render config="kantainer.conf":
-    @./scripts/render-ignition.sh {{ config }}
+    @./scripts/render-ignition.sh "{{ config }}"

@@ -58,7 +58,7 @@ kantainer_load_config() {
     done
 
     local -A seen=()
-    local lineno=0 line key value
+    local lineno=0 line key value known
     while IFS= read -r line || [[ -n "${line}" ]]; do
         lineno=$(( lineno + 1 ))
 
@@ -77,7 +77,18 @@ kantainer_load_config() {
         key="${line%%=*}"
         value="${line#*=}"
 
-        if [[ ! " ${KANTAINER_FIELDS[*]} " == *" ${key} "* ]]; then
+        # Matched one field at a time. Testing against the list joined by spaces
+        # would accept a key that is merely a run of real field names, and the
+        # refusal would then arrive as a raw bash error about an invalid
+        # identifier instead of the line below.
+        known=""
+        for field in "${KANTAINER_FIELDS[@]}"; do
+            if [[ "${key}" == "${field}" ]]; then
+                known="${field}"
+                break
+            fi
+        done
+        if [[ -z "${known}" ]]; then
             kantainer_fail "${path} line ${lineno} sets an unknown field: ${key}
     kantainer.conf.example lists every field this file may set."
         fi

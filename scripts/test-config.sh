@@ -142,6 +142,12 @@ refuses "refuses a passphrase WPA-PSK would not accept" "KANTAINER_WIFI_PASSPHRA
 refuses "refuses a misspelt field rather than ignoring it" "KANTAINER_USERNMAE" \
     "KANTAINER_USERNMAE=operator"
 
+# A key made of two real field names is a substring of the field list joined by
+# spaces, so a membership test done by substring match lets it through and the
+# refusal arrives as a raw bash error instead.
+refuses "refuses a key that merely looks like two fields" "unknown field: KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY" \
+    "KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY=x"
+
 run_missing() {
     local out status=0
     out="$("${CHECK}" "${WORK}/absent" 2>&1)" || status=$?
