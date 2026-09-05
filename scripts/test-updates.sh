@@ -52,6 +52,14 @@ refute() {
     fi
 }
 
+# A shell file with its comment lines removed. Assertions about what a script
+# DOES have to read what it runs, not what it explains: build.sh sets out at
+# length why it does not install a package, and the health check sets out at
+# length why it does not look at Portainer.
+code() {
+    grep -vE '^[[:space:]]*#' "$1"
+}
+
 # The last value systemd would read for a directive, drop-in semantics aside.
 directive() {
     local file="$1" key="$2"
@@ -220,6 +228,73 @@ else
     not_ok "the preflight refuses a signing arrangement that is not ours"
     not_ok "the preflight refuses when bootc cannot report status"
     not_ok "the preflight refuses a status shape it does not recognise"
+fi
+
+### The boot health check (§spec:boot-health-and-rollback)
+
+HEALTH_CHECK="${SYSTEM_FILES}/usr/lib/greenboot/check/required.d/50_docker_active.sh"
+
+assert "the health check ships where greenboot requires it and is executable" \
+    test -x "${HEALTH_CHECK}"
+
+assert "the build installs greenboot" \
+    grep -qE '^dnf5 -y install greenboot$' "${BUILD_SH}"
+
+# greenboot-default-health-checks makes 01_repository_dns_check.sh a REQUIRED
+# check. A home network with flaky DNS would then fail the boot and roll back a
+# working update - the check wrong in the strict direction, which
+# §spec:boot-health-and-rollback rejects because the machine quietly stops
+# receiving fixes while appearing to run normally.
+#
+# Comments are stripped first, here and below. build.sh explains at length why
+# that package is not installed, and a test that could not tell the explanation
+# from the deed would forbid writing the explanation down.
+refute "the build does not install the default health checks" \
+    grep -qF 'greenboot-default-health-checks' <(code "${BUILD_SH}")
+
+# Enabling the health check also enables greenboot-set-rollback-trigger.service
+# through its Also=, which is what arms the boot counter when an update stages.
+assert "the build enables the greenboot health check" \
+    grep -qE '^systemctl enable .*greenboot-healthcheck\.service' "${BUILD_SH}"
+
+assert "the health check asks about the Docker engine" \
+    grep -qF 'docker.service' "${HEALTH_CHECK}"
+
+# The narrowness is the design, not an omission. A check that failed a boot
+# because Portainer was slow to start would roll back a perfectly good operating
+# system update, and keep doing it. §spec:boot-health-and-rollback records that
+# a Portainer-broken machine is deliberately NOT caught here: it is visible in
+# the operator's browser and recoverable over SSH.
+refute "the health check does not test anything above Docker" \
+    grep -qiE 'portainer|9443' <(code "${HEALTH_CHECK}")
+
+# Run it for real against a systemctl that reports what we choose.
+# health_check_with <name> <want-exit> <systemctl-exit>
+health_check_with() {
+    local name="$1" want="$2" stub_exit="$3"
+
+    cat > "${STUB}/systemctl" <<STUBEOF
+#!/bin/bash
+exit ${stub_exit}
+STUBEOF
+    chmod +x "${STUB}/systemctl"
+
+    local got=0
+    PATH="${STUB}:${PATH}" "${HEALTH_CHECK}" > /dev/null 2>&1 || got=$?
+
+    if [[ "${got}" -eq "${want}" ]]; then
+        ok "${name}"
+    else
+        not_ok "${name} (wanted exit ${want}, got ${got})"
+    fi
+}
+
+if [[ -x "${HEALTH_CHECK}" ]]; then
+    health_check_with "the health check passes while Docker is running" 0 0
+    health_check_with "the health check fails while Docker is not running" 1 3
+else
+    not_ok "the health check passes while Docker is running"
+    not_ok "the health check fails while Docker is not running"
 fi
 
 echo

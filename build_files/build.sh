@@ -110,6 +110,30 @@ semodule --noreload --install /usr/share/selinux/packages/kantainer_portainer.pp
 
 dnf5 -y remove selinux-policy-devel
 
+# Boot health checking and rollback (SPEC.md §spec:boot-health-and-rollback)
+#
+# Neither uCore nor Fedora CoreOS beneath it carries health-check machinery:
+# they keep the previous deployment on disk and expect a person to invoke the
+# rollback. greenboot is the missing piece, and it is not a piece worth writing.
+# Verified against greenboot-0.16.4 rather than assumed, it already:
+#
+#   - counts boots in GRUB's boot_counter and clears it on a healthy boot
+#   - reboots the machine itself while the counter is armed and the checks fail
+#   - detects bootc via `bootc status --booted --json` and calls `bootc rollback`
+#   - arms the counter when a new deployment is finalised, through
+#     greenboot-set-rollback-trigger.service
+#
+# It pulls in NOTHING else - one 2.2 MiB package - so §req:quality-attributes'
+# minimality survives it.
+#
+# greenboot-default-health-checks is deliberately NOT installed. It makes
+# 01_repository_dns_check.sh a REQUIRED check, so a home network with flaky DNS
+# would fail the boot and roll back a working update. That is the check wrong in
+# the strict direction, which §spec:boot-health-and-rollback rejects outright:
+# the machine quietly stops receiving fixes while appearing to run normally.
+# The one required check this machine has ships in system_files instead.
+dnf5 -y install greenboot
+
 ### 3. Services (SPEC.md §spec:container-engine)
 #
 # Docker runs from first boot. ucore-minimal ships moby-engine - it comes from
@@ -207,6 +231,22 @@ test -L /etc/systemd/system/timers.target.wants/bootc-fetch-apply-updates.timer
 test ! -e /etc/systemd/system/timers.target.wants/rpm-ostreed-automatic.timer
 [[ "$(readlink /etc/systemd/system/rpm-ostreed-automatic.timer)" == /dev/null ]]
 [[ "$(readlink /etc/systemd/system/zincati.service)" == /dev/null ]]
+
+# Boot health checking (SPEC.md §spec:boot-health-and-rollback).
+#
+# One `enable` is enough for both units: greenboot-healthcheck.service carries
+# `Also=greenboot-set-rollback-trigger.service`, and that second unit is what
+# arms GRUB's boot counter when an update is finalised at shutdown. Enabling the
+# health check without it would run the checks and never roll anything back.
+systemctl enable greenboot-healthcheck.service
+
+# Assert both, because the second one arrives by implication and would vanish
+# silently if greenboot ever dropped that Also=. A machine with the health check
+# running and the counter never armed reports itself healthy, fails nothing, and
+# has no rollback at all.
+test -L /etc/systemd/system/multi-user.target.wants/greenboot-healthcheck.service
+test -L /etc/systemd/system/ostree-finalize-staged.service.requires/greenboot-set-rollback-trigger.service
+test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
 
 ### 4. Cleanup
 #
