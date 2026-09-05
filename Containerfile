@@ -27,4 +27,10 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     /ctx/build.sh
 
 # Fails the build on bootc layout violations.
-RUN bootc container lint
+#
+# --fatal-warnings because the checks that matter most here are warnings, not
+# errors: var-tmpfiles and nonempty-run-tmp both pass the build by default while
+# describing content that will be missing, or stale, on an installed machine.
+# Every /var and /run leftover this repository cleans up was found by a warning
+# that would otherwise have shipped.
+RUN bootc container lint --fatal-warnings
