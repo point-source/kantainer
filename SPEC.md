@@ -362,12 +362,8 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 ## Operating system updates §spec:os-updates
 
 *Status: complete* — not yet confirmed on real hardware: the build environment has no
-virtualisation, so the overnight reboot, the signature refusal and the survival of
-container data across an update remain unobserved. The base image's arrangement was read
-directly rather than assumed: `rpm-ostreed-automatic.timer` ships enabled with
-`AutomaticUpdatePolicy=stage`, and `bootc-fetch-apply-updates.timer` — whose service runs
-`bootc upgrade --apply` — ships present but disabled. The image switches those round and
-gives the applying timer an overnight schedule.
+virtualisation, so the overnight reboot, the signature refusal, and the survival of
+container data across an update remain unobserved.
 
 The machine checks for a new published kantainer image once a day, in an overnight window,
 and installs it without being asked. Applying an update requires a reboot, which the machine
@@ -386,20 +382,32 @@ applying them, so an untouched machine would accumulate downloaded updates it ne
 The system therefore replaces that arrangement with one that applies and reboots, on the
 overnight schedule §req:quality-attributes specifies.
 
+The applying half is not written here. The base platform already carries a timer that
+fetches the new image and reboots into it, switched off; the system turns that on, gives it
+the overnight schedule, and switches the staging one off — disabled *and* masked, because
+disabling alone leaves a unit anything could switch back on and masking alone leaves the
+machine still reporting a staging timer among its enabled units. The update agent the base
+platform inherits from Fedora CoreOS is masked for the same reason: it is already off, but
+it is enabled in a preset, so anything that ever applied presets would restore a second
+update agent pointing at a different source entirely.
+
 Signature verification is required because the machine updates itself unattended from a
 network location; an update channel that accepts anything is a way to own every machine
 that listens to it. The verification material is placed on the machine during installation,
 so the very first update is verified like every other.
 
-The baked policy turns out to be necessary and not sufficient, which cost this system a
-component. `bootc` does not consult `/etc/containers/policy.json` unless the machine was
-attached to the image with `--enforce-container-sigpolicy`: the mode is recorded in the
-deployment origin at attach time, and `bootc upgrade` inherits it without revisiting it. A
-machine attached without that flag pulls its nightly update with no signature check while
-the policy sits there unread, and nothing on the machine fails or says so. The update
-service therefore asks `bootc` which mode it is in and refuses to update unless the answer
-is the container signing policy. Passing that flag when the machine is attached belongs to
-§spec:installer-media; this refusal is what makes its absence loud instead of silent.
+The signing policy §spec:image-publication bakes into the image turns out to be necessary
+and not sufficient, which cost this system a component. The update tool does not consult
+that policy unless the machine was told to enforce it when it was attached to the image,
+and that choice is recorded once, at attach time, rather than reconsidered on each update.
+A machine attached without it pulls its nightly update with no signature check at all while
+the policy sits there unread, and nothing on the machine fails or says so. Before updating,
+the machine therefore asks the update tool which mode it is in and refuses to update unless
+the answer is the signing policy — it reads that tool's own answer rather than re-reading
+the policy file, because a second opinion about someone else's judgement is the one that
+goes stale. Choosing enforcement at attach time belongs to §spec:installer-media; this
+refusal is what makes its absence loud instead of silent, and it fails closed on an answer
+it does not recognise for the same reason.
 
 **Alternatives rejected.** Keeping the base platform's prepare-but-never-apply behaviour was
 rejected as failing §req:success-criteria item 6 while appearing to satisfy it — the most
@@ -417,10 +425,8 @@ Cites §req:success-criteria (6, 7), §req:quality-attributes, §req:priorities.
 ## Boot health and rollback §spec:boot-health-and-rollback
 
 *Status: complete* — not yet confirmed on real hardware: a rollback needs failed boots, and
-the build environment has no virtualisation. One part in particular is unconfirmed and is
-called out under **Tradeoffs** below: on machines installed the way §spec:installer-media
-describes, the boot counter reaches GRUB through `custom.cfg`, which is sourced later in
-the bootloader's configuration than the snippet greenboot installs itself.
+the build environment has no virtualisation. One part is unconfirmed rather than merely
+unobserved, and is called out under **Tradeoffs** below.
 
 After an update, the machine checks that it reached a running state and that the Docker
 engine is active. A boot that fails those checks repeatedly returns the machine to the
@@ -435,20 +441,28 @@ bad update. Neither uCore nor Fedora CoreOS beneath it carries any health-check 
 they keep the previous version on disk and expect a person to invoke the rollback. The
 system adds the missing piece.
 
-That piece is greenboot, which is a Fedora package rather than something written here. It
-counts boots, reboots the machine while the count is armed and the checks fail, and calls
-`bootc rollback` when the count runs out. It arrives with no other packages. What this
-system supplies is the one required check — the Docker engine is active — and one piece of
-wiring greenboot cannot supply for itself, described below.
+That piece is greenboot, a Fedora package rather than something written here. It counts
+boots, reboots the machine while the count is armed and the checks fail, and invokes the
+rollback when the count runs out. It arrives with no other packages, so minimality survives
+it. What this system supplies is the one required check — the Docker engine is active — and
+one piece of wiring greenboot cannot supply for itself.
 
-The machine reaching a running state needs no check of its own. greenboot's health check is
-wanted by `multi-user.target`, so a machine that never gets there never runs it, never
-records a successful boot, and rolls back on the count alone.
+That wiring is greenboot's own boot counter. The countdown runs in the bootloader, from a
+snippet the bootloader tooling installs only when it *installs* a bootloader, never when it
+updates one. A machine built as a virtual disk from this image gets it, because the
+bootloader is installed from this image. A machine installed the way §spec:installer-media
+describes does not: it installs Fedora CoreOS, whose bootloader was written before this
+image existed, and then attaches this image without ever rewriting it. There, greenboot
+would arm a counter nothing decrements and select a fallback nothing honours — no rollback
+at all, on every machine an operator actually owns, while the health check runs and reports
+success. The image therefore installs greenboot's own snippet through the bootloader's
+documented extension point on every boot, and fails loudly on a machine that offers no such
+extension point rather than reporting a rollback it does not have. It installs greenboot's
+file rather than a reimplementation of it, so the countdown stays greenboot's to maintain.
 
-greenboot's optional default health checks are deliberately not installed. They make a
-check of DNS against a package repository a *required* one, so a home network with flaky
-DNS would fail the boot and roll back a working update — the strict-direction failure this
-section rejects, arriving through the package that was supposed to help.
+The machine reaching a running state needs no check of its own. greenboot's health check
+runs as part of reaching a running state, so a machine that never gets there never runs it,
+never records a successful boot, and rolls back on the count alone.
 
 The check is narrow at the operator's direction. A health check that is wrong in the strict
 direction is worse than none: it rolls back working updates indefinitely, and the machine
@@ -461,32 +475,27 @@ accident.
 the reasoning above: a slow start or a Portainer-side fault would be misread as a bad
 operating system update. Relying on manual rollback over SSH was rejected as failing
 §req:success-criteria item 8, and because an update that breaks networking takes SSH with
-it.
+it. greenboot's own optional default health checks were rejected for the same
+strict-direction reason as Portainer: they make a DNS check against a package repository a
+*required* one, so a home network with flaky DNS would fail the boot and roll back a
+working update — the failure this section exists to avoid, arriving through the package
+meant to help. Writing the boot counter from the installer instead of the image was
+rejected because it would reach only machines installed that way and would not repair
+itself if the bootloader were ever rewritten.
 
 **Tradeoffs.** An update that leaves the machine booting and Docker running, but Portainer
 broken, is not caught and does not roll back. That failure is visible — the operator's
 browser does not reach Portainer — and recoverable over SSH, which is what
 §spec:remote-access exists for. The health-check mechanism is an addition to the base
-platform rather than something it maintains, so it is a component this project owns.
+platform rather than something it maintains, so the boot counter is a component this
+project owns.
 
-The wiring greenboot cannot supply for itself is its own boot counter. The countdown runs
-in the bootloader, from a snippet the bootloader tooling installs only when it *installs* a
-bootloader — never when it updates one. A machine built as a virtual disk from this image
-gets that snippet, because the bootloader is installed from this image. A machine installed
-the way §spec:installer-media describes does not: it installs Fedora CoreOS, whose
-bootloader was written before this image existed, and then attaches this image without ever
-rewriting it. On such a machine greenboot would arm a counter nothing decrements and select
-a fallback nothing honours — no rollback at all, on every machine an operator actually owns,
-while the health check runs and reports success. The image therefore installs greenboot's
-own snippet through the bootloader's documented extension point at every boot, and fails
-the unit when a machine offers no such extension point rather than reporting a rollback it
-does not have.
-
-That extension point is read later in the bootloader's configuration than the position
-greenboot installs its snippet at. The countdown is expected to work from either position,
-because the bootloader chooses its entry after reading the whole configuration — but this is
-the one behaviour in the arrangement that has not been observed on a machine, and if it is
-wrong the symptom is silent: a machine that never rolls back.
+The bootloader reads that extension point later in its configuration than the position
+greenboot installs its own snippet at. The countdown is expected to work from either, since
+the bootloader chooses its entry after reading the whole configuration — but this is the one
+behaviour in the arrangement that has not been observed on a machine, and if it is wrong
+the symptom is silent: a machine that never rolls back. It is the first thing to confirm
+when hardware is available.
 
 Cites §req:success-criteria (8), §req:quality-attributes, §req:priorities.
 
