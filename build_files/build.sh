@@ -55,3 +55,34 @@ dnf5 -y install \
 # restores the base image's state exactly.
 dnf5 clean all
 rm -rf /var/lib/dnf /run/dnf
+
+### 4. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
+#
+# KEEP THIS LAST. containers-common can be pulled into any package transaction
+# and replaces /etc/containers/policy.json when it is, so anything installed
+# after this point would silently undo the merge below.
+#
+# ucore-minimal already ships a policy (from ublue-os-signing) with
+# "default": reject and a sigstoreSigned entry for ghcr.io/ublue-os. We MERGE
+# one scope into it rather than writing our own file - overwriting would drop
+# verification of our own base image.
+#
+# matchRepository is required, not stylistic: a cosign signature carries only a
+# repository, so only matchRepository/exactRepository can accept one.
+install -Dpm 0644 /ctx/cosign.pub /etc/pki/containers/kantainer.pub
+
+jq '.transports.docker["ghcr.io/point-source/kantainer"] = [
+      { "type": "sigstoreSigned",
+        "keyPath": "/etc/pki/containers/kantainer.pub",
+        "signedIdentity": { "type": "matchRepository" } } ]' \
+    /etc/containers/policy.json > /tmp/policy.json
+install -Dpm 0644 /tmp/policy.json /etc/containers/policy.json
+rm -f /tmp/policy.json
+
+# Fail the build if either entry is missing. Mirrors uCore's own assertion, and
+# catches a clobbered policy.json - the failure mode that would otherwise ship
+# an image no machine can verify an update from.
+jq -e '.transports.docker["ghcr.io/ublue-os"] | any(.type == "sigstoreSigned")' \
+    /etc/containers/policy.json > /dev/null
+jq -e '.transports.docker["ghcr.io/point-source/kantainer"] | any(.type == "sigstoreSigned")' \
+    /etc/containers/policy.json > /dev/null

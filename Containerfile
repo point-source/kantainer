@@ -1,8 +1,9 @@
-# Build context: carries build_files/ and system_files/ into the build without
-# leaving either of them in the final image.
+# Build context: carries build_files/, system_files/ and the signing public key
+# into the build without leaving the scripts in the final image.
 FROM scratch AS ctx
 COPY build_files /
 COPY system_files /system_files
+COPY cosign.pub /cosign.pub
 
 # uCore MINIMAL, pinned by tag AND digest.
 #

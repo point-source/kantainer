@@ -1,0 +1,8 @@
+# Tells containers/image to look for cosign signatures attached to the kantainer
+# image, which is what /etc/containers/policy.json then requires a valid one of.
+#
+# Scope keys are unique across all files in this directory and are matched most
+# precisely first - this entry inherits nothing from ghcr.io/ublue-os.
+docker:
+  ghcr.io/point-source/kantainer:
+    use-sigstore-attachments: true
