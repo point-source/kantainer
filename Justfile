@@ -55,7 +55,13 @@ lint:
     hadolint Containerfile
     # Collect first, then lint in one call. `find -exec shellcheck {} ';'`
     # discards the exit status, so a gate built on it can never fail.
-    mapfile -t -d '' sh_files < <(find . -iname "*.sh" -type f -not -path "./output/*" -print0)
+    # Executables shipped into the image live in libexec and carry no extension,
+    # so matching *.sh alone silently stopped covering them. Match on the shebang
+    # as well, which is what actually decides whether shellcheck can read a file.
+    mapfile -t -d '' sh_files < <(
+        find . -type f -not -path "./output/*" -not -path "./.git/*" \
+            \( -iname "*.sh" -o -exec grep -lqE '^#!.*\b(bash|sh)\b' {} \; \) -print0
+    )
     if [[ "${#sh_files[@]}" -gt 0 ]]; then
         shellcheck "${sh_files[@]}"
     fi
