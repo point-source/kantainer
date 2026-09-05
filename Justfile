@@ -383,3 +383,17 @@ spawn-vm rebuild="0" type="qcow2" ram="6G":
       --network-user-mode \
       --vsock=false --pass-ssh-key=false \
       -i ./output/**/*.{{ type }}
+
+# Both recipes below read the operator's own kantainer.conf, which is git-ignored
+# and never enters this repository (SPEC.md §spec:machine-configuration). Neither
+# writes anything: `just flash` is the one that touches a USB stick.
+
+# Check the operator's configuration and say what machine it describes
+[group('Operator')]
+config-check config="kantainer.conf":
+    @./scripts/check-config.sh {{ config }}
+
+# Print the machine specification rendered from that configuration
+[group('Operator')]
+render config="kantainer.conf":
+    @./scripts/render-ignition.sh {{ config }}
