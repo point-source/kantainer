@@ -63,8 +63,11 @@ from_tag="${from_image_tag##*:}"
     Containerfile: ${from_digest}
     versions.env:  ${UCORE_DIGEST}"
 
-# The signing public key is what every installed machine verifies updates
-# against. A truncated or malformed key would break every machine at once.
+# A malformed cosign.pub already fails closed at publish time, when the workflow
+# verifies its own signature against it. Checking here buys the same answer on
+# the pull request instead of after merge. It cannot detect the case that
+# matters more - a key that parses but does not match SIGNING_SECRET - which
+# only that publish-time verify catches.
 [[ -f "${ROOT}/cosign.pub" ]] || fail "cosign.pub is missing"
 openssl pkey -pubin -noout -in "${ROOT}/cosign.pub" 2> /dev/null ||
     fail "cosign.pub does not parse as a public key"

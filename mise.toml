@@ -1,5 +1,6 @@
 # Tooling for `just ci`. The same versions on the operator's machine and in CI,
-# so a green gate locally means a green gate on a pull request.
+# so a green gate locally means a green gate on a pull request. The gate also
+# uses the system's git, jq and openssl, which are not pinned here.
 #
 # Install with: mise install
 
