@@ -5,6 +5,7 @@ COPY build_files /
 COPY system_files /system_files
 COPY cosign.pub /cosign.pub
 COPY image.env /image.env
+COPY versions.env /versions.env
 
 # uCore MINIMAL, pinned by tag AND digest.
 #

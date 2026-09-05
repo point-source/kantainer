@@ -74,6 +74,25 @@ case "${PORTAINER_DIGEST}" in
     Portainer is pulled by digest alone. Pin it as sha256:..." ;;
 esac
 
+# The pin is only a pin while the build reads it from here. A digest written
+# straight into build.sh would still produce a working image, so nothing else
+# would notice - versions.env would quietly become decorative and Renovate would
+# keep bumping a number nothing consumes.
+build_sh="${ROOT}/build_files/build.sh"
+[[ -f "${build_sh}" ]] || fail "no build_files/build.sh in ${ROOT}"
+
+# Literal, not expanded: we are looking for the reference itself in the source.
+# shellcheck disable=SC2016
+grep -q '${PORTAINER_DIGEST}' "${build_sh}" ||
+    fail "build_files/build.sh does not read PORTAINER_DIGEST from versions.env
+    Pull Portainer as \${PORTAINER_IMAGE}@\${PORTAINER_DIGEST}, never a literal digest."
+
+if literal="$(grep -nE 'sha256:[0-9a-f]{64}' "${build_sh}")"; then
+    fail "build_files/build.sh carries a literal digest:
+    ${literal}
+    Digests belong in versions.env, which check-pins.sh and Renovate both watch."
+fi
+
 # A malformed cosign.pub already fails closed at publish time, when the workflow
 # verifies its own signature against it. Checking here buys the same answer on
 # the pull request instead of after merge. It cannot detect the case that

@@ -1,0 +1,29 @@
+#!/bin/bash
+# Load the Portainer image carried inside the OS image into Docker.
+#
+# SPEC.md §spec:portainer-service: Portainer is present on disk before the
+# machine ever boots and is never downloaded onto it. Docker offers no way to
+# share a read-only image store, so the image travels as an archive and is
+# loaded here.
+#
+# Runs on every boot rather than once behind a first-boot stamp. The archive is
+# named by the exact tag versions.env pins, so when that pin is bumped and the
+# new OS image lands, the new tag is simply absent from Docker's store and this
+# loads it. A stamp would have to live in /var and would pin the machine to
+# whichever Portainer it first booted with.
+
+set -oue pipefail
+
+ARCHIVE=/usr/lib/kantainer/portainer.tar
+REF_FILE=/usr/lib/kantainer/portainer-image
+
+read -r IMAGE_REF < "${REF_FILE}"
+
+if docker image inspect "${IMAGE_REF}" > /dev/null 2>&1; then
+    echo "portainer-load: ${IMAGE_REF} already present"
+    exit 0
+fi
+
+echo "portainer-load: loading ${IMAGE_REF} from ${ARCHIVE}"
+docker load --input "${ARCHIVE}"
+docker image inspect "${IMAGE_REF}" > /dev/null

@@ -66,6 +66,9 @@ expect 1 "rejects a missing Portainer pin" \
 expect 1 "rejects a Portainer pin that is not a digest" \
     "sed -i 's|^PORTAINER_DIGEST=.*|PORTAINER_DIGEST=latest|' versions.env"
 
+expect 1 "rejects a Portainer digest hardcoded in the build" \
+    "sed -i 's|\${PORTAINER_DIGEST}|sha256:0000000000000000000000000000000000000000000000000000000000000000|' build_files/build.sh"
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all pin checks behave as intended"

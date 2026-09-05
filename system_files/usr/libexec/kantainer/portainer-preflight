@@ -1,0 +1,54 @@
+#!/bin/bash
+# Stage the Portainer administrator password for the Portainer container, and
+# refuse to start without it (SPEC.md §spec:portainer-service).
+#
+# The password is written at install time by the installer's Ignition config
+# (Batch 3). This batch only consumes it.
+#
+# Why the password is copied into /run rather than mounted from /etc: the
+# container has to read the file, and a file under /etc carries a label the
+# container is not allowed to read. Staging a copy into /run - tmpfs, gone at
+# reboot - and labelling that copy for container access keeps the SELinux policy
+# module scoped to the Docker socket alone, which is all §spec:portainer-service
+# grants.
+
+set -oue pipefail
+
+PASSWORD_FILE=/etc/kantainer/portainer-admin-password
+STAGED_DIR=/run/kantainer
+STAGED="${STAGED_DIR}/portainer-admin-password"
+
+if [[ ! -s "${PASSWORD_FILE}" ]]; then
+    if [[ -e "${PASSWORD_FILE}" ]]; then
+        reason="is empty"
+    else
+        reason="is missing"
+    fi
+    cat >&2 <<MSG
+Portainer was not started: the administrator password file ${reason}.
+
+  Expected at: ${PASSWORD_FILE}
+  Written by:  the installer, from the Portainer password in your configuration
+               file.
+
+Starting Portainer without it would publish an administration page on the
+network that anyone reaching it could claim. That is worse than not serving.
+
+To fix it, either reinstall with the Portainer password set in your
+configuration file, or write the file on this machine (owner root, mode 0600,
+no trailing whitespace) and run:
+
+  systemctl start kantainer-portainer
+MSG
+    exit 1
+fi
+
+install -d -m 0700 "${STAGED_DIR}"
+install -m 0600 /dev/null "${STAGED}"
+cat "${PASSWORD_FILE}" > "${STAGED}"
+
+# Label the copy so the Portainer container may read it. Skipped when SELinux is
+# off, where there is nothing to label and chcon fails.
+if selinuxenabled; then
+    chcon -t container_file_t "${STAGED}"
+fi
