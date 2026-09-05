@@ -1,0 +1,76 @@
+# The machine specification, rendered by scripts/render-ignition.sh from the
+# operator's kantainer.conf. This file is a template, not a valid config on its
+# own: @@NAME@@ placeholders are replaced with JSON-quoted values.
+#
+# Secrets are never substituted into this text. The Portainer password and the
+# wireless keyfile are staged as files and pulled in with `local:`, so nothing
+# here has to be escaped for YAML and no password ever passes through a sed
+# expression.
+#
+# SPEC VERSION. fcos 1.6.0 (Ignition 3.5.0), deliberately not the newest butane
+# accepts. fcos 1.7.0 emits Ignition 3.6.0, which Ignition marked stable in
+# 2.26.0 - exactly the release versions.env pins, so a config using it would
+# work on that release and no earlier one. Everything below has existed since
+# spec 1.0.0, so the newer spec buys nothing and spends the margin.
+variant: fcos
+version: 1.6.0
+
+passwd:
+  users:
+    # The login account, and the key it accepts (SPEC.md §spec:remote-access).
+    # wheel and sudo are what Fedora CoreOS gives its own `core` user: remote
+    # access exists for "the rare occasion something needs looking at", and an
+    # account that cannot become root cannot do that.
+    - name: @@USERNAME@@
+      ssh_authorized_keys:
+        - @@SSH_PUBLIC_KEY@@
+      groups:
+        - wheel
+        - sudo
+
+storage:
+  files:
+    # SPEC.md §spec:remote-access: password authentication is refused for every
+    # account - refused outright, not merely left unset, so that a later change
+    # which sets a password somewhere cannot quietly open a door.
+    #
+    # The number is low on purpose. sshd uses the FIRST value it reads for a
+    # keyword and processes sshd_config.d in lexical order, so the lowest-
+    # numbered drop-in is the authoritative one. Fedora CoreOS ships its own
+    # 40-disable-passwords.conf saying the same thing; at 10 this file wins over
+    # that one and over anything added later, which is the point.
+    #
+    # Both keywords are set because they are two different doors:
+    # KbdInteractiveAuthentication reaches PAM's password prompt even when
+    # PasswordAuthentication is off.
+    - path: /etc/ssh/sshd_config.d/10-kantainer-no-passwords.conf
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+
+    # The Portainer administrator password, in plain text
+    # (SPEC.md §spec:machine-configuration). Batch 2 reads this exact path to
+    # create the administrator before Portainer's interface accepts its first
+    # connection - do not rename it.
+    #
+    # No trailing newline: the file is the password and nothing else, so a
+    # reader can use its whole contents without having to strip anything.
+    - path: /etc/kantainer/portainer-admin-password
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: portainer-admin-password
+
+    # KEEP THE FILES LIST LAST. render-ignition.sh appends
+    # butane/wireless.bu.tmpl here, as a further entry of this list, when and
+    # only when the operator's config names a wireless network. Anything added
+    # below would land inside the appended fragment instead.
