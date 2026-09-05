@@ -4,6 +4,7 @@ FROM scratch AS ctx
 COPY build_files /
 COPY system_files /system_files
 COPY cosign.pub /cosign.pub
+COPY image.env /image.env
 
 # uCore MINIMAL, pinned by tag AND digest.
 #

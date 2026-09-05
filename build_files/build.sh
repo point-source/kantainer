@@ -61,28 +61,65 @@ rm -rf /var/lib/dnf /run/dnf
 # KEEP THIS LAST. containers-common can be pulled into any package transaction
 # and replaces /etc/containers/policy.json when it is, so anything installed
 # after this point would silently undo the merge below.
+
+# The scope is derived from image.env, never written by hand. It must name the
+# exact reference the publish workflow pushes to: a machine looks up the image
+# it is pulling, and a scope that does not match is not a strict policy, it is
+# no policy at all (see the transport default below).
+# shellcheck source=/dev/null
+. /ctx/image.env
+IMAGE_REF="$(echo "${IMAGE_REGISTRY}/${REPO_ORGANIZATION}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+
+# ucore-minimal already ships a policy (from ublue-os-signing) with a
+# sigstoreSigned entry for ghcr.io/ublue-os. We MERGE into it rather than
+# writing our own file - overwriting would drop verification of our own base.
 #
-# ucore-minimal already ships a policy (from ublue-os-signing) with
-# "default": reject and a sigstoreSigned entry for ghcr.io/ublue-os. We MERGE
-# one scope into it rather than writing our own file - overwriting would drop
-# verification of our own base image.
+# Two things are set here:
 #
-# matchRepository is required, not stylistic: a cosign signature carries only a
-# repository, so only matchRepository/exactRepository can accept one.
+#   - our own scope, requiring a signature from the key baked in below.
+#     matchRepository is required, not stylistic: a cosign signature carries
+#     only a repository, so it is the only identity type that can accept one.
+#
+#   - the docker transport default, changed from the base image's
+#     insecureAcceptAnything to reject. That default is consulted BEFORE the
+#     top-level "default": reject, so inheriting it means any image not matching
+#     an explicit scope is accepted unsigned. SPEC.md §spec:os-updates requires
+#     the opposite. With this set, a scope that ever stopped matching the
+#     published reference would stop updates rather than accept anything - the
+#     failure becomes loud instead of silent.
+#
+#     The cost is that podman on the installed machine can only pull from the
+#     scopes named here. That is consistent with §spec:container-engine, where
+#     podman is present but carries no workloads; Docker runs the operator's
+#     containers and does not consult this file.
 install -Dpm 0644 /ctx/cosign.pub /etc/pki/containers/kantainer.pub
 
-jq '.transports.docker["ghcr.io/point-source/kantainer"] = [
-      { "type": "sigstoreSigned",
-        "keyPath": "/etc/pki/containers/kantainer.pub",
-        "signedIdentity": { "type": "matchRepository" } } ]' \
+jq --arg ref "${IMAGE_REF}" '
+      .transports.docker[$ref] = [
+        { "type": "sigstoreSigned",
+          "keyPath": "/etc/pki/containers/kantainer.pub",
+          "signedIdentity": { "type": "matchRepository" } } ]
+    | .transports.docker[""] = [ { "type": "reject" } ]' \
     /etc/containers/policy.json > /tmp/policy.json
 install -Dpm 0644 /tmp/policy.json /etc/containers/policy.json
 rm -f /tmp/policy.json
 
-# Fail the build if either entry is missing. Mirrors uCore's own assertion, and
+# Tell containers/image to look for cosign signatures on our image. Generated
+# from the same IMAGE_REF, so the scope cannot drift from the policy above.
+mkdir -p /etc/containers/registries.d
+cat > /etc/containers/registries.d/kantainer.yaml <<EOF
+docker:
+  ${IMAGE_REF}:
+    use-sigstore-attachments: true
+EOF
+chmod 0644 /etc/containers/registries.d/kantainer.yaml
+
+# Fail the build if the merge did not take. Mirrors uCore's own assertion, and
 # catches a clobbered policy.json - the failure mode that would otherwise ship
 # an image no machine can verify an update from.
 jq -e '.transports.docker["ghcr.io/ublue-os"] | any(.type == "sigstoreSigned")' \
     /etc/containers/policy.json > /dev/null
-jq -e '.transports.docker["ghcr.io/point-source/kantainer"] | any(.type == "sigstoreSigned")' \
+jq -e --arg ref "${IMAGE_REF}" '.transports.docker[$ref] | any(.type == "sigstoreSigned")' \
+    /etc/containers/policy.json > /dev/null
+jq -e '.transports.docker[""] | all(.type == "reject")' \
     /etc/containers/policy.json > /dev/null

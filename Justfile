@@ -3,6 +3,7 @@ set dotenv-load
 
 export image_name := env_var("IMAGE_NAME")
 export repo_organization := env_var("REPO_ORGANIZATION")
+export image_registry := env_var("IMAGE_REGISTRY")
 export image_desc := env_var("IMAGE_DESC")
 export image_keywords := env_var("IMAGE_KEYWORDS")
 export default_tag := env_var("DEFAULT_TAG")
@@ -85,19 +86,6 @@ check-pins:
 test:
     ./scripts/test-check-pins.sh
 
-# Runs shfmt on all Bash scripts
-[group('Lint')]
-format:
-    #!/usr/bin/env bash
-    set -eou pipefail
-    # Check if shfmt is installed
-    if ! command -v shfmt &> /dev/null; then
-        echo "shfmt could not be found. Please install it."
-        exit 1
-    fi
-    # Run shfmt on all Bash scripts
-    find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
-
 # Clean Repo
 [group('Utility')]
 clean:
@@ -105,9 +93,6 @@ clean:
     set -eou pipefail
     touch _build
     find *_build* -exec rm -rf {} \;
-    rm -f previous.manifest.json
-    rm -f changelog.md
-    rm -f output.env
     rm -rf output/
 
 # Sudo Clean Repo
@@ -227,6 +212,16 @@ tag-images $target_image=image_name $tag=default_tag tags="":
 
     # Show Images
     podman images
+
+# The published image reference - derived from image.env, never written by hand.
+# The build bakes this exact string into the image's signing policy, so the
+# publish workflow must push to it and nothing else.
+[group('Utility')]
+image_ref:
+    #!/usr/bin/env bash
+    set -eou pipefail
+
+    echo "${image_registry}/${repo_organization}/${image_name}" | tr '[:upper:]' '[:lower:]'
 
 # Image Name
 [group('Utility')]
@@ -372,7 +367,7 @@ spawn-vm rebuild="0" type="qcow2" ram="6G":
 
     set -euo pipefail
 
-    [ "{{ rebuild }}" -eq 1 ] && echo "Rebuilding the VM image" && just build-vm {{ rebuild }} {{ type }}
+    [ "{{ rebuild }}" -eq 1 ] && echo "Rebuilding the VM image" && just "build-{{ type }}"
 
     systemd-vmspawn \
       -M "bootc-image" \
