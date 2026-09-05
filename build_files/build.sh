@@ -240,6 +240,13 @@ test ! -e /etc/systemd/system/timers.target.wants/rpm-ostreed-automatic.timer
 # health check without it would run the checks and never roll anything back.
 systemctl enable greenboot-healthcheck.service
 
+# greenboot's countdown is a GRUB snippet, and bootupd only assembles it into
+# grub.cfg when it INSTALLS a bootloader. A machine installed the way
+# §spec:installer-media describes - Fedora CoreOS first, then attach this image -
+# boots a bootloader written before kantainer existed, with no countdown in it.
+# This unit puts it there. See the script for the whole reasoning.
+systemctl enable kantainer-greenboot-grub.service
+
 # Assert both, because the second one arrives by implication and would vanish
 # silently if greenboot ever dropped that Also=. A machine with the health check
 # running and the counter never armed reports itself healthy, fails nothing, and

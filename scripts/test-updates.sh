@@ -297,6 +297,141 @@ else
     not_ok "the health check fails while Docker is not running"
 fi
 
+### The GRUB boot counter (§spec:boot-health-and-rollback)
+
+SEED="${SYSTEM_FILES}/usr/libexec/kantainer/greenboot-grub-seed"
+SEED_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-greenboot-grub.service"
+
+assert "the boot-counter seed ships and is executable" \
+    test -x "${SEED}"
+
+assert "the boot-counter seed has a unit" \
+    test -f "${SEED_UNIT}"
+
+assert "the build enables the boot-counter seed" \
+    grep -qE '^systemctl enable .*kantainer-greenboot-grub\.service' "${BUILD_SH}"
+
+# It has to run before greenboot arms the counter, or the first update after
+# installation stages with a counter nothing decrements.
+assert "the seed runs before the health check" \
+    grep -qxF 'Before=greenboot-healthcheck.service' "${SEED_UNIT}"
+
+# greenboot's countdown is GRUB's: 08_greenboot.cfg decrements boot_counter and
+# selects the previous deployment when it runs out. bootupd assembles that
+# snippet into /boot/grub2/grub.cfg only at bootloader-INSTALL time
+# (`bootupctl backend install --with-static-configs`; `bootupctl update` has no
+# such flag). Machines installed the way §spec:installer-media describes - the
+# Fedora CoreOS installer, then attach - therefore boot a grub.cfg written
+# before kantainer existed, with no counter logic in it at all. greenboot would
+# arm a counter nothing decrements and choose a fallback nothing honours: no
+# rollback, on every real machine, silently.
+#
+# These run the seed against a throwaway /boot rather than grepping it. The
+# three branches are the whole point, and each one fails invisibly on a machine.
+# seed_case <name> <want-exit> <grub.cfg contents>
+seed_case() {
+    local name="$1" want="$2" grub_cfg="$3"
+    local dir
+    dir="$(mktemp -d)"
+
+    mkdir -p "${dir}/grub2"
+    printf '%s\n' "${grub_cfg}" > "${dir}/grub2/grub.cfg"
+    printf 'set boot_success=0\nsave_env boot_success\n' > "${dir}/snippet.cfg"
+
+    local got=0
+    "${SEED}" "${dir}/grub2" "${dir}/snippet.cfg" > /dev/null 2>&1 || got=$?
+
+    if [[ "${got}" -ne "${want}" ]]; then
+        not_ok "${name} (wanted exit ${want}, got ${got})"
+    else
+        SEED_DIR="${dir}"
+        ok "${name}"
+        return 0
+    fi
+    rm -rf "${dir}"
+    return 1
+}
+
+if [[ -x "${SEED}" ]]; then
+    # The qcow2 path: bootupd already assembled greenboot's snippet into
+    # grub.cfg. Writing custom.cfg too would decrement the counter TWICE per
+    # boot, rolling the machine back after two failed boots instead of three.
+    # GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
+    # variables and must reach the file unexpanded.
+    # shellcheck disable=SC2016
+    if seed_case "the seed leaves a bootloader that already counts boots alone" 0 \
+        'insmod increment
+if [ -n "${boot_counter}" -a "${boot_success}" = "0" ]; then
+  decrement boot_counter
+fi'; then
+        refute "the seed writes nothing when the counter is already there" \
+            test -e "${SEED_DIR}/grub2/custom.cfg"
+        rm -rf "${SEED_DIR}"
+    else
+        not_ok "the seed writes nothing when the counter is already there"
+    fi
+
+    # The real machines: FCOS's grub.cfg, whose only extension point is the
+    # custom.cfg that bootupd's own 41_custom.cfg sources.
+    # GRUB config, not shell. $prefix and ${boot_counter} are GRUB's own
+    # variables and must reach the file unexpanded.
+    # shellcheck disable=SC2016
+    if seed_case "the seed installs the counter through the bootloader's own seam" 0 \
+        'if [ -f $prefix/custom.cfg ]; then
+  source $prefix/custom.cfg
+fi'; then
+        assert "the seed writes greenboot's snippet, not its own copy of it" \
+            grep -qxF 'set boot_success=0' "${SEED_DIR}/grub2/custom.cfg"
+
+        # Running every boot, it must not churn /boot on a machine that is
+        # already correct.
+        before="$(cat "${SEED_DIR}/grub2/custom.cfg")"
+        "${SEED}" "${SEED_DIR}/grub2" "${SEED_DIR}/snippet.cfg" > /dev/null 2>&1 || true
+        if [[ "${before}" == "$(cat "${SEED_DIR}/grub2/custom.cfg")" ]]; then
+            ok "the seed is unchanged by running twice"
+        else
+            not_ok "the seed is unchanged by running twice"
+        fi
+        rm -rf "${SEED_DIR}"
+    else
+        not_ok "the seed writes greenboot's snippet, not its own copy of it"
+        not_ok "the seed is unchanged by running twice"
+    fi
+
+    # No counter and no seam. Writing custom.cfg would achieve nothing, and
+    # exiting 0 would report a rollback this machine does not have. A failed
+    # unit is the only honest outcome.
+    seed_case "the seed fails loudly when the bootloader has no seam to use" 1 \
+        'blscfg' && rm -rf "${SEED_DIR}"
+
+    # greenboot ships the snippet; if it is not there, greenboot is not there,
+    # and nothing about rollback works. Say which file is missing rather than
+    # letting cp say it.
+    seed_missing="$(mktemp -d)"
+    mkdir -p "${seed_missing}/grub2"
+    # shellcheck disable=SC2016
+    printf 'source $prefix/custom.cfg\n' > "${seed_missing}/grub2/grub.cfg"
+    got=0
+    "${SEED}" "${seed_missing}/grub2" "${seed_missing}/absent.cfg" > /dev/null 2>&1 || got=$?
+    if [[ "${got}" -eq 1 ]]; then
+        ok "the seed fails when greenboot's snippet is missing"
+    else
+        not_ok "the seed fails when greenboot's snippet is missing (wanted exit 1, got ${got})"
+    fi
+    rm -rf "${seed_missing}"
+else
+    for missing in \
+        "the seed leaves a bootloader that already counts boots alone" \
+        "the seed writes nothing when the counter is already there" \
+        "the seed installs the counter through the bootloader's own seam" \
+        "the seed writes greenboot's snippet, not its own copy of it" \
+        "the seed is unchanged by running twice" \
+        "the seed fails loudly when the bootloader has no seam to use" \
+        "the seed fails when greenboot's snippet is missing"; do
+        not_ok "${missing}"
+    done
+fi
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all update and boot-health checks behave as intended"
