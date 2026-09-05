@@ -149,6 +149,79 @@ assert "the build masks the update agent the base image leaves installed" \
 assert "the build stops rpm-ostree from staging updates" \
     grep -qF 'AutomaticUpdatePolicy=none' "${BUILD_SH}"
 
+### Signature-verified updates (§spec:os-updates)
+
+PREFLIGHT="${SYSTEM_FILES}/usr/libexec/kantainer/update-preflight"
+
+assert "the update preflight ships and is executable" \
+    test -x "${PREFLIGHT}"
+
+# Plumbing with no consumer is plumbing that never runs. The preflight only
+# means anything if the update service refuses to start without it.
+assert "the update service runs the preflight before updating" \
+    grep -qxF 'ExecStartPre=/usr/libexec/kantainer/update-preflight' "${SERVICE_DROPIN}"
+
+# The preflight's verdict comes from `bootc status`, so it can be tested for
+# real: give it a bootc that says a chosen thing and assert what it does. What
+# matters is the DIRECTION it fails in. bootc does not enforce the container
+# signing policy unless the machine was attached with
+# --enforce-container-sigpolicy, and a preflight that passed when it could not
+# tell would leave every machine updating itself unsigned, forever, silently.
+STUB="$(mktemp -d)"
+trap 'rm -rf "${STUB}"' EXIT
+
+# preflight_with <name> <want-exit> <bootc-exit> <bootc-stdout>
+preflight_with() {
+    local name="$1" want="$2" stub_exit="$3" stub_out="$4"
+
+    cat > "${STUB}/bootc" <<STUBEOF
+#!/bin/bash
+cat <<'PAYLOAD'
+${stub_out}
+PAYLOAD
+exit ${stub_exit}
+STUBEOF
+    chmod +x "${STUB}/bootc"
+
+    local got=0
+    PATH="${STUB}:${PATH}" "${PREFLIGHT}" > /dev/null 2>&1 || got=$?
+
+    if [[ "${got}" -eq "${want}" ]]; then
+        ok "${name}"
+    else
+        not_ok "${name} (wanted exit ${want}, got ${got})"
+    fi
+}
+
+if [[ -x "${PREFLIGHT}" ]]; then
+    preflight_with "the preflight allows an update the signing policy governs" 0 0 \
+        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":"containerPolicy"}}}}}'
+
+    preflight_with "the preflight refuses when nothing verifies the signature" 1 0 \
+        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest"}}}}}'
+
+    # An ostree remote's GPG key is a different signing arrangement from the
+    # cosign key this repository publishes with. Verified by something other
+    # than our policy is not verified by our policy.
+    preflight_with "the preflight refuses a signing arrangement that is not ours" 1 0 \
+        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signature":{"ostreeRemote":"fedora"}}}}}}'
+
+    preflight_with "the preflight refuses when bootc cannot report status" 1 1 \
+        ''
+
+    # If a later bootc renames or moves the field, the query stops matching. The
+    # only safe direction for that is refusing: updates stop and say why, rather
+    # than continuing unverified while the check quietly passes everything.
+    preflight_with "the preflight refuses a status shape it does not recognise" 1 0 \
+        '{"status":{"booted":{"image":{"image":{"transport":"registry","image":"ghcr.io/point-source/kantainer:latest","signatureMode":"containerPolicy"}}}}}'
+else
+    not_ok "the preflight allows an update the signing policy governs"
+    not_ok "the preflight refuses when nothing verifies the signature"
+    not_ok "the preflight refuses a signing arrangement that is not ours"
+    not_ok "the preflight refuses when bootc cannot report status"
+    not_ok "the preflight refuses a status shape it does not recognise"
+fi
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all update and boot-health checks behave as intended"
