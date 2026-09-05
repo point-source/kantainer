@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+  ],
+
+  "rebaseWhen": "never",
+
+  "packageRules": [
+    // Pinning action SHAs is mechanical and safe to land unattended.
+    {
+      "automerge": true,
+      "matchUpdateTypes": ["pin", "pinDigest"],
+    },
+
+    // The base image is deliberately NOT automerged. Renovate rewrites the FROM
+    // line in the Containerfile, but the same pin is also recorded in
+    // versions.env for the installer half of the system, and Renovate does not
+    // know about that file. `just ci` fails the pull request until a human
+    // updates versions.env to match - which is the point, not an annoyance.
+    {
+      "matchFileNames": ["Containerfile"],
+      "automerge": false,
+      "addLabels": ["base-image"],
+      "description": "Update versions.env in the same pull request, or `just ci` will fail.",
+    },
+
+    // Container references inside workflow files stay on their floating tags.
+    {
+      "enabled": false,
+      "matchUpdateTypes": ["digest", "pinDigest", "pin"],
+      "matchDepTypes": ["container"],
+      "matchFileNames": [".github/workflows/**.yaml", ".github/workflows/**.yml"],
+    },
+  ],
+}
