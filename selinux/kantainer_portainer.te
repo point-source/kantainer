@@ -22,6 +22,7 @@ policy_module(kantainer_portainer, 1.0.0)
 
 gen_require(`
 	attribute container_domain;
+	attribute container_net_domain;
 	attribute container_file_type;
 	type container_runtime_t;
 ')
@@ -32,6 +33,14 @@ type kantainer_portainer_file_t;
 container_file(kantainer_portainer_file_t)
 
 container_domain_template(kantainer_portainer, kantainer_portainer)
+
+# Portainer serves HTTPS on 9443, and container_domain alone cannot listen on a
+# socket or bind a port - container-selinux keeps network access on a separate
+# attribute, and every upstream domain that talks to the network takes it right
+# after the template call. Without this the unit starts, fails to bind, and
+# systemd gives up: the machine boots serving nothing, but only on an enforcing
+# kernel, which is exactly where a build-time test cannot see it.
+typeattribute kantainer_portainer_t container_net_domain;
 
 # Docker starts containers with NoNewPrivileges, which needs this transition.
 container_runtime_typebounds(kantainer_portainer_t)
