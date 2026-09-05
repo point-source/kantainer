@@ -1,0 +1,10 @@
+---
+# The workflows are linted for meaning by actionlint; yamllint is here to catch
+# malformed YAML in the files this repository ships into the image.
+extends: relaxed
+
+rules:
+  line-length: disable
+
+ignore: |
+  output/

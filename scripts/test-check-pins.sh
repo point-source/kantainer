@@ -1,0 +1,68 @@
+#!/bin/bash
+# Tests for check-pins.sh.
+#
+# The pin check exists because the Containerfile's FROM line and versions.env
+# must agree, and nothing else notices when they stop agreeing. A silent
+# disagreement means an unreproducible image, or installer media built from a
+# different Fedora CoreOS release than the image expects.
+
+set -oue pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CHECK="${REPO_ROOT}/scripts/check-pins.sh"
+
+failures=0
+
+# Run the check against a throwaway copy of the repo, after applying `mutate`.
+# Asserts the check's exit status matches `want` (0 = pass, 1 = should fail).
+expect() {
+    local want="$1" name="$2" mutate="$3"
+    local tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "${tmp}"' RETURN
+
+    cp "${REPO_ROOT}/Containerfile" "${REPO_ROOT}/versions.env" "${REPO_ROOT}/cosign.pub" "${tmp}/"
+    ( cd "${tmp}" && eval "${mutate}" )
+
+    local got=0
+    "${CHECK}" "${tmp}" > /dev/null 2>&1 || got=1
+
+    if [[ "${got}" -eq "${want}" ]]; then
+        echo "ok       - ${name}"
+    else
+        echo "NOT OK   - ${name} (wanted exit ${want}, got ${got})"
+        failures=$(( failures + 1 ))
+    fi
+}
+
+expect 0 "accepts the repository as committed" \
+    "true"
+
+expect 1 "rejects a digest that disagrees with versions.env" \
+    "sed -i 's/^UCORE_DIGEST=.*/UCORE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000/' versions.env"
+
+expect 1 "rejects a tag that disagrees with versions.env" \
+    "sed -i 's/^UCORE_TAG=.*/UCORE_TAG=stable-19700101/' versions.env"
+
+expect 1 "rejects a floating base tag with no digest" \
+    "sed -i 's|^FROM ghcr.io/ublue-os/ucore-minimal.*|FROM ghcr.io/ublue-os/ucore-minimal:stable|' Containerfile"
+
+expect 1 "rejects a base image that disagrees with versions.env" \
+    "sed -i 's/^UCORE_IMAGE=.*/UCORE_IMAGE=ghcr.io\/ublue-os\/ucore/' versions.env"
+
+expect 1 "rejects a missing Fedora CoreOS pin" \
+    "sed -i 's/^FCOS_VERSION=.*/FCOS_VERSION=/' versions.env"
+
+expect 1 "rejects a missing signing public key" \
+    "rm -f cosign.pub"
+
+expect 1 "rejects a signing public key that is not a public key" \
+    "echo 'not a key' > cosign.pub"
+
+echo
+if [[ "${failures}" -eq 0 ]]; then
+    echo "all pin checks behave as intended"
+else
+    echo "${failures} pin check(s) misbehaved"
+    exit 1
+fi
