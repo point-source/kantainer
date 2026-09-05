@@ -1,0 +1,110 @@
+# The installer media's own configuration, rendered by
+# scripts/render-installer.sh and embedded in the Fedora CoreOS live ISO by
+# `just flash` (SPEC.md §spec:installer-media).
+#
+# This configures the LIVE environment - the thing that boots off the USB stick
+# and installs. The configuration for the machine that results is a separate
+# document, butane/kantainer.bu.tmpl, which travels inside this one as
+# /etc/kantainer/machine.ign and is handed to coreos-installer.
+#
+# Nothing here is substituted: every value that varies between operators is
+# staged as a file and pulled in with `local:`, so no password, key or drive
+# name ever passes through this text. This file is therefore a complete,
+# valid Butane config on its own, unlike butane/kantainer.bu.tmpl.
+#
+# SPEC VERSION. Same choice, and the same reasoning, as
+# butane/kantainer.bu.tmpl: fcos 1.6.0 emits Ignition 3.5.0, which every
+# release this repository pins can read.
+variant: fcos
+version: 1.6.0
+
+systemd:
+  units:
+    # The first stage. Chooses a drive by the rule in SPEC.md
+    # §spec:drive-selection, installs Fedora CoreOS to it, and reboots.
+    #
+    # coreos-installer's own service is deliberately NOT used: it is driven by
+    # `coreos.inst.*` kernel arguments and /etc/coreos/installer.d, neither of
+    # which can express "the drive named in the configuration, or the only one,
+    # or stop and ask". Its unattended mode clears every attached drive.
+    #
+    # It does bring one thing worth having, so this unit requires it:
+    # coreos-installer-pre.target stops udev, mdadm and LVM from auto-activating
+    # what is on the target disk, which is what makes an install onto a machine
+    # with a previous operating system on it work rather than fail on a busy
+    # device. That is the installer's own preparation, and reusing it beats
+    # rediscovering why it exists.
+    - name: kantainer-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=kantainer: install Fedora CoreOS to disk
+        Requires=coreos-installer-pre.target
+        After=coreos-installer-pre.target
+        # The prompt and the login prompt want the same screen.
+        Conflicts=getty@tty1.service
+        Before=getty@tty1.service
+        # A failed install must look like a failed install. Without this the
+        # machine carries on to a login prompt, which is indistinguishable from
+        # a machine that installed correctly and is waiting to be used. This is
+        # what coreos-installer's own service does for the same reason.
+        OnFailure=emergency.target
+        OnFailureJobMode=replace-irreversibly
+
+        [Service]
+        Type=oneshot
+        # journal AND console: the console is where the operator reads the drive
+        # list, and the journal is what survives to be read afterwards when
+        # nobody was watching.
+        StandardOutput=journal+console
+        StandardError=journal+console
+        # The multi-drive case stops at a prompt, so this unit needs a real
+        # keyboard attached to it. /dev/console is where the live ISO's own
+        # output goes, which is the screen the operator is already looking at.
+        StandardInput=tty-force
+        TTYPath=/dev/console
+        TTYReset=yes
+        TTYVHangup=yes
+        ExecStart=/usr/local/bin/kantainer-install-to-disk /etc/kantainer/target-drive /etc/kantainer/machine.ign
+
+        [Install]
+        WantedBy=multi-user.target
+
+storage:
+  files:
+    # The machine's own configuration, handed to coreos-installer and written
+    # into the installed system. It carries the operator's SSH key and their
+    # Portainer password, which is why the installer media is produced on the
+    # operator's own machine and never published
+    # (REQUIREMENTS.md §req:quality-attributes).
+    - path: /etc/kantainer/machine.ign
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: machine.ign
+
+    # KANTAINER_TARGET_DRIVE, verbatim. Empty when the operator named no drive,
+    # which is the case that makes the installer count what it finds.
+    - path: /etc/kantainer/target-drive
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: target-drive
+
+    # scripts/install-to-disk. /usr/local/bin because that is where Fedora
+    # CoreOS expects an operator's own executables and where the SELinux policy
+    # already labels them as such; systemd will not run a script out of /etc.
+    - path: /usr/local/bin/kantainer-install-to-disk
+      mode: 0755
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: install-to-disk

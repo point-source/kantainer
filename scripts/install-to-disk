@@ -1,0 +1,229 @@
+#!/bin/bash
+# The first stage: choose a drive, install Fedora CoreOS to it, reboot
+# (SPEC.md §spec:drive-selection, §spec:installer-media).
+#
+# THIS DOES NOT RUN ON THE OPERATOR'S MACHINE. `just flash` embeds it in the
+# installer media's Ignition config, and kantainer-install.service runs it once,
+# in the live environment, on the machine being installed. It lives in scripts/
+# so that `just ci` shellchecks it and scripts/test-install-to-disk.sh can drive
+# the rule without a machine and two disks to lose.
+#
+# THE RULE, in order:
+#   1. the drive the configuration names, if it names one
+#   2. otherwise the machine's only drive, if it has exactly one
+#   3. otherwise nothing is written: the drives are listed with model, size and
+#      serial, and the installer stops at a prompt
+#
+# The medium the installer booted from is never a candidate. That is not only
+# the safety rule SPEC.md states - it is what makes rule 2 work at all. A
+# single-drive machine has the USB stick attached while this runs, so counting
+# it would present two drives, stop at a prompt, and break the unattended
+# installation REQUIREMENTS.md §req:success-criteria item 2 asks for.
+#
+# coreos-installer's own unattended mode is deliberately unused: it clears every
+# attached drive rather than a named one, and it cannot be combined with a rule
+# of ours. This script calls `coreos-installer install` with one device, chosen
+# here.
+#
+# Usage: install-to-disk <target-drive-file> <machine-ignition>
+
+set -oue pipefail
+
+kantainer_fail() {
+    echo "kantainer-install: $*" >&2
+    exit 1
+}
+
+# The medium this installer booted from, as a whole disk.
+#
+# `coreos.liveiso=<volume label>` is put on the kernel command line by the live
+# ISO itself - coreos-installer reads the same karg when it rewrites its own
+# media - so this is the ISO's own account of which filesystem it is, not a
+# guess of ours about which device looks removable.
+kantainer_boot_disk() {
+    local karg label device parent
+
+    label=""
+    for karg in $(< /proc/cmdline); do
+        case "${karg}" in
+            coreos.liveiso=*) label="${karg#coreos.liveiso=}" ;;
+        esac
+    done
+
+    [[ -n "${label}" ]] ||
+        kantainer_fail "no coreos.liveiso= on the kernel command line, so the medium this
+    installer booted from cannot be identified. Refusing to choose a drive:
+    getting this wrong is the one mistake here that cannot be undone."
+
+    device="$(blkid --label "${label}")" ||
+        kantainer_fail "no filesystem labelled ${label} on this machine, so the medium this
+    installer booted from cannot be identified. Refusing to choose a drive."
+
+    # A dd-written stick presents the ISO filesystem as a partition of the disk;
+    # PKNAME is empty when the device already is the whole disk.
+    parent="$(lsblk --noheadings --output PKNAME "${device}" | head -n 1)"
+    if [[ -n "${parent}" ]]; then
+        printf '/dev/%s\n' "${parent}"
+    else
+        printf '%s\n' "${device}"
+    fi
+}
+
+# Every whole disk the machine has, boot medium included. Replaced by the tests.
+kantainer_list_disks() {
+    lsblk --json --nodeps --output NAME,TYPE,MODEL,SIZE,SERIAL
+}
+
+# One line per drive: path, model, size, serial.
+#
+# zram is filtered by name because lsblk reports its type as "disk". Fedora
+# CoreOS carries a zram swap device, so a rule that trusted the type alone would
+# offer the operator their own RAM as an installation target.
+kantainer_disk_rows() {
+    jq -r '
+        .blockdevices[]
+        | select(.type == "disk")
+        | select(.name | startswith("zram") | not)
+        | [ "/dev/" + .name,
+            (.model // "unknown"),
+            (.size // "unknown"),
+            (.serial // "unknown") ]
+        | @tsv'
+}
+
+# What the operator reads when the machine cannot decide. Labelled rather than
+# aligned in columns: a model string can be any length, and a person at a
+# console at an unreasonable hour should not have to count columns to work out
+# which disk holds their data.
+kantainer_describe_disks() {
+    local -n rows_ref="$1"
+    local i=1 row path model size serial
+
+    for row in "${rows_ref[@]}"; do
+        IFS=$'\t' read -r path model size serial <<< "${row}"
+        printf '  %d) %s\n' "${i}" "${path}" >&2
+        printf '       model:  %s\n' "${model}" >&2
+        printf '       size:   %s\n' "${size}" >&2
+        printf '       serial: %s\n' "${serial}" >&2
+        i=$(( i + 1 ))
+    done
+}
+
+# Prints the chosen device on stdout. Everything a person reads goes to stderr,
+# so the caller can take the answer as a value.
+kantainer_select_drive() {
+    local target="${1-}"
+    local boot row path rest
+    local -a rows=() candidates=() paths=()
+
+    boot="$(kantainer_boot_disk)"
+
+    mapfile -t rows < <(kantainer_list_disks | kantainer_disk_rows)
+
+    for row in "${rows[@]}"; do
+        IFS=$'\t' read -r path rest <<< "${row}"
+        paths+=("${path}")
+        if [[ "${path}" != "${boot}" ]]; then
+            candidates+=("${row}")
+        fi
+    done
+
+    if [[ -n "${target}" ]]; then
+        [[ "${target}" != "${boot}" ]] ||
+            kantainer_fail "the configuration names ${target}, which is the medium this installer
+    booted from. Nothing was written. Name the machine's own drive in
+    KANTAINER_TARGET_DRIVE and flash the stick again."
+
+        for path in "${paths[@]}"; do
+            if [[ "${path}" == "${target}" ]]; then
+                printf '%s\n' "${target}"
+                return 0
+            fi
+        done
+
+        kantainer_fail "the configuration names ${target}, which this machine does not have.
+    Nothing was written. Drives found: ${paths[*]-none}"
+    fi
+
+    if [[ "${#candidates[@]}" -eq 0 ]]; then
+        kantainer_fail "this machine has no drive to install to. Nothing was written."
+    fi
+
+    if [[ "${#candidates[@]}" -eq 1 ]]; then
+        IFS=$'\t' read -r path rest <<< "${candidates[0]}"
+        printf '%s\n' "${path}"
+        return 0
+    fi
+
+    # SPEC.md §spec:drive-selection: write nothing, say what is here, and wait
+    # for a person. Powering off and halting were both considered and rejected -
+    # one needs a re-flash to recover, the other leaves no way forward.
+    {
+        echo
+        echo "kantainer: this machine has more than one drive and the configuration does"
+        echo "not name one. NOTHING HAS BEEN WRITTEN."
+        echo
+    } >&2
+    kantainer_describe_disks candidates
+    {
+        echo
+        echo "Naming the drive in kantainer.conf avoids this prompt entirely."
+        echo
+    } >&2
+
+    local answer index
+    while true; do
+        # The prompt ends with a newline rather than leaving the cursor on it.
+        # kantainer-install.service sends this to the journal AND the console,
+        # and journald forwards whole lines - an unterminated prompt would sit
+        # in a buffer while the operator stared at a screen that had stopped.
+        printf 'Select the drive to install to [1-%d], then press Enter:\n' "${#candidates[@]}" >&2
+        if ! read -r answer; then
+            echo >&2
+            kantainer_fail "no drive was selected. Nothing was written."
+        fi
+        if [[ "${answer}" =~ ^[0-9]+$ ]]; then
+            index=$(( 10#${answer} ))
+            if [[ "${index}" -ge 1 && "${index}" -le "${#candidates[@]}" ]]; then
+                IFS=$'\t' read -r path rest <<< "${candidates[index - 1]}"
+                printf '%s\n' "${path}"
+                return 0
+            fi
+        fi
+        echo "  not one of the drives listed above" >&2
+    done
+}
+
+main() {
+    local target_file="${1:-/etc/kantainer/target-drive}"
+    local ignition="${2:-/etc/kantainer/machine.ign}"
+    local target="" device
+
+    [[ -f "${ignition}" ]] ||
+        kantainer_fail "no machine configuration at ${ignition}"
+
+    if [[ -f "${target_file}" ]]; then
+        read -r target < "${target_file}" || true
+    fi
+
+    device="$(kantainer_select_drive "${target}")"
+
+    echo "kantainer-install: installing Fedora CoreOS to ${device}" >&2
+    coreos-installer install --ignition-file "${ignition}" "${device}"
+
+    {
+        echo
+        echo "kantainer-install: installed to ${device}. Rebooting."
+        echo "REMOVE THE USB STICK NOW, so this machine boots from ${device} and not"
+        echo "from the installer again."
+        echo
+    } >&2
+
+    # --no-block: this unit is part of the transaction systemd is about to run,
+    # so waiting for the job to finish would be waiting for ourselves.
+    systemctl --no-block reboot
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
