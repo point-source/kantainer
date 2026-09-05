@@ -39,25 +39,9 @@ Cites §req:constraints, §req:quality-attributes.
 
 ## Installer media §spec:installer-media
 
-*Status: complete* — not yet confirmed on real hardware: the build environment has no
-USB device to write and no machine to boot, so the write itself, both reboots and the
-signature refusal remain unobserved. Everything up to the write is covered by `just ci`.
-
-`just flash` fetches the Fedora CoreOS release pinned in `versions.env`, verifies it
-against the committed checksum, personalises it with the operator's configuration, and
-writes the stick. The installed machine attaches itself with
-`rpm-ostree rebase ostree-image-signed:`, verified against a policy the same command
-places on it during installation.
-
-One consequence of that placement is worth recording, because it is permanent. ostree
-carries `/etc` forward as local modification, so after the rebase the machine's
-`/etc/containers/policy.json`, signing key and `registries.d` entry are the copies the
-installer wrote, shadowing the image's own for the life of the machine. Two effects,
-both accepted: the image's `ghcr.io/ublue-os` scope is absent on an installed machine,
-which costs nothing because it only ever pulls its own image; and a later change to the
-image's policy reaches an installed machine by reflashing rather than by updating. A
-rotated signing key therefore stops that machine updating rather than being accepted
-silently — it fails closed.
+*Status: complete* — not yet confirmed on real hardware: the build environment has no USB
+device to write and no machine to boot, so the write itself, both reboots and the signature
+refusal remain unobserved. Everything up to the write is covered by `just ci`.
 
 The operator produces a bootable USB stick with one command, from two inputs: the Fedora
 CoreOS installer image and their filled-in configuration file. Booting a target machine
@@ -72,7 +56,19 @@ reaching a serving state.
 
 The installer verifies the signature of the kantainer image before adopting it, using
 signing material placed on the machine during installation. An image that does not carry a
-valid signature from the repository's key is refused.
+valid signature from the repository's key is refused. The attachment uses the command uCore
+documents for this transition rather than one of ours; uCore's own example reaches the
+signed image through an unsigned rebase first, because its policy exists only inside its
+image, and placing the policy during installation is what removes that unverified step.
+
+That placement has one permanent consequence, recorded here because it is invisible from
+outside. ostree carries `/etc` forward as local modification, so after the rebase the
+machine's signing policy is the copy the installer wrote, shadowing the image's own for the
+life of the machine. Two effects, both accepted: the image's `ghcr.io/ublue-os` scope is
+absent on an installed machine, which costs nothing because such a machine only ever pulls
+its own image; and a later change to the image's policy reaches an installed machine by
+reflashing rather than by updating. A rotated signing key therefore stops that machine
+updating rather than being accepted silently — it fails closed.
 
 **Decision and constraint.** uCore ships no installer of its own and cannot be installed
 directly from an installer image — it is a Fedora CoreOS derivative, and the only supported
@@ -163,19 +159,8 @@ Cites §req:success-criteria (1, 4, 10), §req:constraints, §req:quality-attrib
 
 ## Drive selection §spec:drive-selection
 
-*Status: complete* — not yet confirmed on real hardware: the rule itself is driven by
-`scripts/test-install-to-disk.sh` against fixtures for every case, but no two-disk
-machine has been booted to watch it stop.
-
-The rule is `scripts/install-to-disk`, carried into the installer environment by
-`just flash` and run by `kantainer-install.service`. `coreos-installer`'s unattended
-mode is not used at all.
-
-The boot medium is excluded for correctness rather than only for safety: a single-drive
-machine has the USB stick attached while the rule runs, so counting it would present two
-drives and stop at a prompt, breaking the unattended installation §req:success-criteria
-item 2 asks for. It is identified from `coreos.liveiso=`, the live ISO's own account of
-itself, and the rule refuses outright rather than guessing if that cannot be resolved.
+*Status: complete* — not yet confirmed on real hardware: every branch of the rule is driven
+by tests against fixtures, but no two-disk machine has been booted to watch it stop.
 
 When the configuration file names a target drive, the installer uses it. When it does not
 and the machine has exactly one drive, the installer uses that drive. When it does not and
@@ -183,7 +168,12 @@ the machine has more than one, the installer writes nothing: it lists the drives
 with enough detail — model, size, and serial — to tell them apart, and stops at a prompt
 where the operator can select one.
 
-The medium the installer booted from is never a candidate.
+The medium the installer booted from is never a candidate. Excluding it is a matter of
+correctness and not only of safety: a single-drive machine has the USB stick attached while
+the rule runs, so counting it would present two drives and stop at a prompt, breaking the
+unattended installation §req:success-criteria item 2 asks for. The medium is identified from
+the live ISO's own account of itself, on the kernel command line, and the installer refuses
+outright rather than guessing if that cannot be resolved.
 
 **Decision and constraint.** §req:priorities ranks not destroying data third, and notes it
 is the only failure here that is not recoverable. The installer's own unattended mode
