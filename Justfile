@@ -81,10 +81,16 @@ lint-yaml:
 check-pins:
     ./scripts/check-pins.sh
 
-# Run the repository's tests
+# Run the repository's tests - every scripts/test-*.sh, so a new test file
+# is picked up by adding it rather than by remembering to list it here
 [group('Lint')]
 test:
-    ./scripts/test-check-pins.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for t in scripts/test-*.sh; do
+        echo "Running: ${t}"
+        "./${t}"
+    done
 
 # Clean Repo
 [group('Utility')]
