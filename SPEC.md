@@ -582,7 +582,13 @@ Cites §req:success-criteria (11), §req:quality-attributes, §req:constraints.
 
 ## Operator documentation §spec:operator-documentation
 
-*Status: not started*
+*Status: complete* — `docs/rebuild.md`, `docs/flash.md` and `docs/verify.md`, indexed from the
+README. The not-yet-working case is the second half of `docs/verify.md`. Every command, path and
+recipe the documentation names is checked against this repository by `scripts/test-docs.sh`,
+which `just ci` runs. One part is unconfirmed rather than merely unwritten: the first-boot
+sequence the verification procedure describes has never been watched on hardware, for the same
+reason §spec:installer-media records — so each claim in it is traced to the code path that
+produces it, and it deliberately states no timings, only the signal that ends each phase.
 
 The repository documents three things, each as a procedure the operator can follow without
 reconstructing anything from memory: how to rebuild after changing something, how to write

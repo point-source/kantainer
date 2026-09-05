@@ -6,8 +6,14 @@ Built from [uCore](https://github.com/ublue-os/ucore)'s minimal variant and publ
 `ghcr.io/point-source/kantainer`. See [REQUIREMENTS.md](REQUIREMENTS.md) for what it is for
 and [SPEC.md](SPEC.md) for how it works.
 
-Operator documentation — how to rebuild, how to write the installer to a USB stick, and how
-to confirm Portainer is up after first boot — is written once the system it describes exists.
+## Operator documentation
+
+- [Rebuild after a change](docs/rebuild.md) — what to edit, the gate to run, what pushing does,
+  and how to tell a build published.
+- [Flash the installer to a USB stick](docs/flash.md) — filling in the configuration file, the
+  single flash command, and what it asks before it erases anything.
+- [Confirm Portainer is up after first boot](docs/verify.md) — the two reboots, the certificate
+  warning, the login page, and what to check when Portainer does not answer.
 
 ## Working on this repository
 
