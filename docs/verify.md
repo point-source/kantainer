@@ -49,8 +49,12 @@ Portainer starts.
 The machine takes whatever address your router hands out. It assumes no fixed address, and it is
 not given one.
 
-**Look at your router's device list or DHCP leases.** The new machine appears under the account
-name from your configuration file.
+**Look at your router's device list or DHCP leases.** Nothing here sets the machine's hostname,
+so do not go looking for one called `kantainer` — it will appear under whatever Fedora CoreOS
+reports by default. Two reliable ways to pick it out:
+
+- It is the entry that was not there before you started.
+- If you have several new entries, match the MAC address of the machine's ethernet port.
 
 ## Open it
 
@@ -75,8 +79,9 @@ about. The administrator account is created from the password in your configurat
 *before* the web server accepts its first connection. So:
 
 - **A login page** means the machine installed itself, attached to the right image, verified its
-  signature, started Docker, loaded Portainer and passed it your password. Log in as `admin` with
-  that password.
+  signature, started Docker, loaded Portainer and passed it your password. Log in with the
+  password from your configuration file, as the administrator account Portainer creates from it
+  (`admin`).
 - **A setup or "create the first user" screen** would mean Portainer started without your
   password. Do not claim the account from that screen — read the next section instead.
 

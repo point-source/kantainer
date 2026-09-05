@@ -25,8 +25,8 @@ just ci
 ```
 
 `just ci` is the single gate: Justfile formatting, Containerfile and shell lint, workflow and
-YAML lint, and a check that the pinned base image in `Containerfile` still agrees with
-`versions.env`. Run it before landing anything.
+YAML lint, a check that the pinned base image in `Containerfile` still agrees with
+`versions.env`, and every `scripts/test-*.sh`. Run it before landing anything.
 
 `just build` builds the image locally with podman. `just --list` shows the rest.
 
