@@ -39,7 +39,14 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 # --security-opt label=type: is what opts this one container into the domain the
 # policy module defines. Without it Portainer would run as container_t, which is
 # every container on the machine and deliberately has no access to the socket.
+# --pull=never is what actually holds "never pull Portainer from a registry".
+# docker run defaults to --pull=missing, so if the image were ever removed from
+# the store - an operator running `docker system prune -a`, say - this line
+# would quietly fetch it from Docker Hub by tag, unsigned, bypassing the digest
+# pin entirely. The load unit cannot catch that: it is a oneshot and stays
+# active once it has run this boot. Failing here instead is the honest outcome.
 exec /usr/bin/docker run --rm --name kantainer-portainer \
+    --pull=never \
     --publish 9443:9443 \
     --security-opt label=type:kantainer_portainer_t \
     --volume /run/docker.sock:/var/run/docker.sock \
