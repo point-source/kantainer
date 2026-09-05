@@ -583,38 +583,42 @@ Cites §req:success-criteria (11), §req:quality-attributes, §req:constraints.
 ## Operator documentation §spec:operator-documentation
 
 *Status: complete* — `docs/rebuild.md`, `docs/flash.md` and `docs/verify.md`, indexed from the
-README. The not-yet-working case is the second half of `docs/verify.md`. Every command, path and
-recipe the documentation names is checked against this repository by `scripts/test-docs.sh`,
-which `just ci` runs. One part is unconfirmed rather than merely unwritten: the first-boot
-sequence the verification procedure describes has never been watched on hardware, for the same
-reason §spec:installer-media records — so each claim in it is traced to the code path that
-produces it, and it deliberately states no timings, only the signal that ends each phase.
+README.
 
-The repository documents three things, each as a procedure the operator can follow without
-reconstructing anything from memory: how to rebuild after changing something, how to write
-the installer to a USB stick, and how to confirm Portainer is up after first boot.
+Three procedures the operator can follow without reconstructing anything from memory: how to
+rebuild after changing something, how to write the installer to a USB stick, and how to confirm
+Portainer is up after first boot. The third also states what to check when Portainer does not
+answer, so that a machine which stopped part-way through installation is distinguishable from one
+that is merely still working.
 
-The verification procedure states what the operator should expect to see and roughly when —
-including that the machine reboots twice before it serves, that browsers warn about the
-certificate, and how to find the machine's address. It also states what to check when
-Portainer does not answer, so that a machine that stopped part-way through installation is
-distinguishable from one that is merely still working.
+`scripts/test-docs.sh`, which `just ci` runs, fails when the documentation names a `just` recipe,
+a repository path, a `kantainer-*` unit, a configuration field or a relative link this repository
+no longer has. It decides names, not meaning: a procedure whose steps have gone stale while every
+name in it still resolves passes. Ports and first-boot behaviour are checked by reading, because
+nothing in the build environment can reach a machine.
 
-**Decision and constraint.** §req:success-criteria item 12 requires exactly these three
-documents. The verification procedure is expanded to cover the not-yet-working case because
-this system's install has a legitimate multi-minute window during which the correct
-behaviour and a failure look identical from outside — see §spec:installer-media. A
-verification procedure that only describes success would leave the operator guessing during
-precisely the interval where guessing is likely.
+**Decision and constraint.** §req:success-criteria item 12 requires exactly these three documents.
+The verification procedure is expanded to cover the not-yet-working case because this system's
+install has a legitimate multi-minute window during which correct behaviour and failure look
+identical from outside — see §spec:installer-media. A procedure that only describes success would
+leave the operator guessing during precisely the interval where guessing is likely.
 
-The documentation is written after the system is built, per §req:priorities, so that it
-describes what exists.
+The documentation is written after the system is built, per §req:priorities, so that it describes
+what exists. That ordering changed what shipped, in one way worth recording: the first-boot
+sequence has never been watched on hardware, for the reason §spec:installer-media gives. Every
+claim in the verification procedure is therefore traced to the code path that produces it, and the
+procedure states no durations at all — only the signal that ends each phase. Telling an operator
+"about two minutes" when nobody has held a stopwatch would be worse than telling them nothing,
+because that guess is what decides them the machine is broken.
 
-**Alternatives rejected.** Documenting only the success path was rejected for the reason
-above. Deferring documentation entirely was rejected by §req:success-criteria item 12.
+**Alternatives rejected.** Documenting only the success path was rejected for the reason above.
+Deferring documentation entirely was rejected by §req:success-criteria item 12. Stating expected
+durations was rejected as unmeasured — an invented number fails the operator exactly where the
+procedure is supposed to help. Checking the documentation's prose, ports or upstream unit names
+was rejected: none is decidable from what this repository holds, and a check that wrongly passes
+is worse than no check.
 
 **Tradeoffs.** Documentation written last is documentation that can be cut under pressure.
-§req:priorities accepts that ranking while stating the repository is worth little without
-it.
+§req:priorities accepts that ranking while stating the repository is worth little without it.
 
 Cites §req:success-criteria (12), §req:priorities.
