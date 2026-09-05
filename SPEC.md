@@ -361,7 +361,13 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 
 ## Operating system updates §spec:os-updates
 
-*Status: not started*
+*Status: complete* — not yet confirmed on real hardware: the build environment has no
+virtualisation, so the overnight reboot, the signature refusal and the survival of
+container data across an update remain unobserved. The base image's arrangement was read
+directly rather than assumed: `rpm-ostreed-automatic.timer` ships enabled with
+`AutomaticUpdatePolicy=stage`, and `bootc-fetch-apply-updates.timer` — whose service runs
+`bootc upgrade --apply` — ships present but disabled. The image switches those round and
+gives the applying timer an overnight schedule.
 
 The machine checks for a new published kantainer image once a day, in an overnight window,
 and installs it without being asked. Applying an update requires a reboot, which the machine
@@ -385,6 +391,16 @@ network location; an update channel that accepts anything is a way to own every 
 that listens to it. The verification material is placed on the machine during installation,
 so the very first update is verified like every other.
 
+The baked policy turns out to be necessary and not sufficient, which cost this system a
+component. `bootc` does not consult `/etc/containers/policy.json` unless the machine was
+attached to the image with `--enforce-container-sigpolicy`: the mode is recorded in the
+deployment origin at attach time, and `bootc upgrade` inherits it without revisiting it. A
+machine attached without that flag pulls its nightly update with no signature check while
+the policy sits there unread, and nothing on the machine fails or says so. The update
+service therefore asks `bootc` which mode it is in and refuses to update unless the answer
+is the container signing policy. Passing that flag when the machine is attached belongs to
+§spec:installer-media; this refusal is what makes its absence loud instead of silent.
+
 **Alternatives rejected.** Keeping the base platform's prepare-but-never-apply behaviour was
 rejected as failing §req:success-criteria item 6 while appearing to satisfy it — the most
 dangerous kind of failure, because the machine looks healthy while falling behind on fixes.
@@ -400,7 +416,11 @@ Cites §req:success-criteria (6, 7), §req:quality-attributes, §req:priorities.
 
 ## Boot health and rollback §spec:boot-health-and-rollback
 
-*Status: not started*
+*Status: complete* — not yet confirmed on real hardware: a rollback needs failed boots, and
+the build environment has no virtualisation. One part in particular is unconfirmed and is
+called out under **Tradeoffs** below: on machines installed the way §spec:installer-media
+describes, the boot counter reaches GRUB through `custom.cfg`, which is sourced later in
+the bootloader's configuration than the snippet greenboot installs itself.
 
 After an update, the machine checks that it reached a running state and that the Docker
 engine is active. A boot that fails those checks repeatedly returns the machine to the
@@ -414,6 +434,21 @@ Docker itself.
 bad update. Neither uCore nor Fedora CoreOS beneath it carries any health-check machinery;
 they keep the previous version on disk and expect a person to invoke the rollback. The
 system adds the missing piece.
+
+That piece is greenboot, which is a Fedora package rather than something written here. It
+counts boots, reboots the machine while the count is armed and the checks fail, and calls
+`bootc rollback` when the count runs out. It arrives with no other packages. What this
+system supplies is the one required check — the Docker engine is active — and one piece of
+wiring greenboot cannot supply for itself, described below.
+
+The machine reaching a running state needs no check of its own. greenboot's health check is
+wanted by `multi-user.target`, so a machine that never gets there never runs it, never
+records a successful boot, and rolls back on the count alone.
+
+greenboot's optional default health checks are deliberately not installed. They make a
+check of DNS against a package repository a *required* one, so a home network with flaky
+DNS would fail the boot and roll back a working update — the strict-direction failure this
+section rejects, arriving through the package that was supposed to help.
 
 The check is narrow at the operator's direction. A health check that is wrong in the strict
 direction is worse than none: it rolls back working updates indefinitely, and the machine
@@ -433,6 +468,25 @@ broken, is not caught and does not roll back. That failure is visible — the op
 browser does not reach Portainer — and recoverable over SSH, which is what
 §spec:remote-access exists for. The health-check mechanism is an addition to the base
 platform rather than something it maintains, so it is a component this project owns.
+
+The wiring greenboot cannot supply for itself is its own boot counter. The countdown runs
+in the bootloader, from a snippet the bootloader tooling installs only when it *installs* a
+bootloader — never when it updates one. A machine built as a virtual disk from this image
+gets that snippet, because the bootloader is installed from this image. A machine installed
+the way §spec:installer-media describes does not: it installs Fedora CoreOS, whose
+bootloader was written before this image existed, and then attaches this image without ever
+rewriting it. On such a machine greenboot would arm a counter nothing decrements and select
+a fallback nothing honours — no rollback at all, on every machine an operator actually owns,
+while the health check runs and reports success. The image therefore installs greenboot's
+own snippet through the bootloader's documented extension point at every boot, and fails
+the unit when a machine offers no such extension point rather than reporting a rollback it
+does not have.
+
+That extension point is read later in the bootloader's configuration than the position
+greenboot installs its snippet at. The countdown is expected to work from either position,
+because the bootloader chooses its entry after reading the whole configuration — but this is
+the one behaviour in the arrangement that has not been observed on a machine, and if it is
+wrong the symptom is silent: a machine that never rolls back.
 
 Cites §req:success-criteria (8), §req:quality-attributes, §req:priorities.
 

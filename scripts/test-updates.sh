@@ -432,6 +432,26 @@ else
     done
 fi
 
+### Data durability across updates (§spec:os-updates)
+#
+# Almost all of this is already true and already guarded rather than built here.
+# /var is shared across bootc deployments, so Docker's /var/lib/docker and
+# Portainer's /var/lib/portainer survive an update - and a ROLLBACK, which means
+# returning the operating system to its previous version does not take the
+# operator's containers back with it. `bootc container lint --fatal-warnings`
+# already fails the build on anything baked into /var without a tmpfiles entry,
+# which is the change that would break this.
+#
+# The one thing nothing else asserts is the tmpfiles entry itself. Content baked
+# into /var is unpacked only from the image a machine INSTALLED, never from a
+# later one, so without this line a machine that updated into a new image would
+# come up with no /var/lib/portainer and Portainer would start over with no
+# settings and no administrator - §req:success-criteria item 7, broken by an
+# update, which is the case this batch exists to keep working.
+assert "Portainer's data directory is recreated on machines that updated into this image" \
+    grep -qE '^d[[:space:]]+/var/lib/portainer[[:space:]]' \
+    "${SYSTEM_FILES}/usr/lib/tmpfiles.d/kantainer.conf"
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all update and boot-health checks behave as intended"
