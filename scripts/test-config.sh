@@ -194,10 +194,15 @@ decode() {
     esac
 }
 
-# Render a valid config with the given overrides into $WORK/out.json.
+# Render a valid config with the given overrides into $WORK/out.json. A failure
+# is reported and the run continues: under `set -e` one broken render would
+# otherwise abort the suite and hide every test after it.
 render() {
     config "${WORK}/conf" "$@"
-    "${RENDER}" "${WORK}/conf" > "${WORK}/out.json"
+    if ! "${RENDER}" "${WORK}/conf" > "${WORK}/out.json" 2> "${WORK}/out.err"; then
+        not_ok "render failed: $(cat "${WORK}/out.err")"
+        : > "${WORK}/out.json"
+    fi
 }
 
 # File contents at path $1 in the rendered output, decoded. Butane compresses
@@ -293,7 +298,7 @@ fi
 # discovered in person.
 ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C 'a&b\c|d%e' < /dev/null
 AWKWARD_KEY="$(cat "${WORK}/awkward.pub")"
-AWKWARD_PSK='pass&word\slash|pipe%pct'
+AWKWARD_PSK="${TEST_PASSPHRASE}"'&\|%'
 AWKWARD_SSID='net&work\one'
 
 render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
@@ -314,7 +319,7 @@ else
     not_ok "a passphrase containing & \\ | % survives intact"
 fi
 
-AWKWARD_PASSWORD='p&ss\w|rd%123'
+AWKWARD_PASSWORD="${TEST_PASSWORD}"'&\|%'
 render "KANTAINER_PORTAINER_PASSWORD=${AWKWARD_PASSWORD}"
 if [[ "$(file_at /etc/kantainer/portainer-admin-password)" == "${AWKWARD_PASSWORD}" ]]; then
     ok "a Portainer password containing & \\ | % survives intact"
