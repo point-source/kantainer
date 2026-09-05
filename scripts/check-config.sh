@@ -3,9 +3,9 @@
 # the field to go and fix (SPEC.md §spec:machine-configuration).
 #
 # This is `just config-check`. It reads the operator's file, says what the
-# machine it describes will be, and writes nothing anywhere. `just render` and,
-# once Batch 4 lands, `just flash` apply the same rules through the same
-# library, so a config this accepts is a config those two can build from.
+# machine it describes will be, and writes nothing anywhere. `just render` and
+# `just flash` apply the same rules through the same library, so a config this
+# accepts is a config those two can build from.
 #
 # Usage: check-config.sh [config-file]
 

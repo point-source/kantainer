@@ -2,8 +2,8 @@
 # Reads and validates the operator's machine configuration file
 # (SPEC.md §spec:machine-configuration).
 #
-# Sourced by check-config.sh and render-ignition.sh, and by `just flash` once
-# Batch 4 lands, so that every one of them agrees on what a valid config is.
+# Sourced by check-config.sh, render-ignition.sh and flash.sh, so that every one
+# of them agrees on what a valid config is.
 # A second copy of these rules would drift, and the failure would be a machine
 # that installed itself and then refused the operator's key.
 #
@@ -185,5 +185,5 @@ kantainer_refuse_if_publishable() {
     kantainer_fail "${path} is inside this repository and git does not ignore it
     It carries your Portainer password, and this repository is public. Either add
     it to .gitignore, or keep it outside the repository and name it:
-        just render config=/path/to/your.conf"
+        just render /path/to/your.conf"
 }
