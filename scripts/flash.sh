@@ -65,6 +65,22 @@ kantainer_check_device() {
     You probably mean /dev/${pkname}."
     fi
 
+    # Everything that is not a whole disk fails for the same reason the partition
+    # above does - loop, device-mapper, RAID and optical devices are not something
+    # a machine boots an installer from - so the rule is stated positively rather
+    # than as a list of things to exclude. A USB stick is always type "disk".
+    #
+    # This is NOT a judgement about whether the device is safe to erase. There is
+    # no such judgement to make from here, and the comment above says why. It is
+    # the same objective check as the partition one: lsblk's own verdict about
+    # what kind of device this is.
+    if [[ "${type}" != "disk" ]]; then
+        kantainer_fail "${device} is a ${type:-unrecognised} device, not a whole drive.
+    An installer has to be written to a physical drive to be bootable.
+    List what is attached with:
+        lsblk --nodeps --output NAME,TYPE,MODEL,SIZE"
+    fi
+
     printf '%s\t%s\n' "${model}" "${size}"
 }
 

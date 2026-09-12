@@ -81,6 +81,22 @@ else
     fi
 fi
 
+# A partition is not the only thing that is not a drive. Writing an installer to
+# a loop device, an LVM volume or a RAID member fails for exactly the same reason
+# - nothing boots from it - and dd would have destroyed the backing store first.
+for kind in loop dm raid1 rom; do
+    facts "${kind}" "" 28.9G ""
+    if err="$( ( kantainer_check_device /dev/whatever ) 2>&1 >/dev/null )"; then
+        not_ok "refuses a ${kind} device, which is not a whole drive either"
+    else
+        if [[ "${err}" == *"${kind}"* ]]; then
+            ok "refuses a ${kind} device and says what it saw"
+        else
+            not_ok "refuses a ${kind} device but does not say what it saw (got: ${err})"
+        fi
+    fi
+done
+
 # No guessing beyond that. A spare stick and the only backup drive look
 # identical from here, and choosing between them is the operator's to do.
 facts disk "Kingston DataTraveler" 28.9G ""
