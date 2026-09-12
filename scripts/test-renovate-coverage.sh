@@ -73,12 +73,16 @@ for family in "${families[@]}"; do
 done
 
 # The Fedora CoreOS checksum is the one pin Renovate CANNOT complete, so the
-# network check that catches the half-done bump has to exist and has to run.
-if grep -q 'check-installer-pin' "${REPO_ROOT}/.github/workflows/ci.yml"; then
-    ok "the Fedora CoreOS checksum check runs in CI"
-else
-    not_ok "nothing runs check-installer-pin in CI - a Renovate bump of FCOS_VERSION would land with the previous release's checksum and every offline check would pass"
-fi
+# network check that catches the half-done bump has to exist and has to run - on
+# BOTH paths that can change versions.env. A pull request meets ci.yml; a direct
+# push to the default branch never does, and that is the path that publishes.
+for wf in ci build; do
+    if grep -q 'check-installer-pin' "${REPO_ROOT}/.github/workflows/${wf}.yml"; then
+        ok "the Fedora CoreOS checksum check runs in ${wf}.yml"
+    else
+        not_ok "${wf}.yml does not run check-installer-pin - a bump of FCOS_VERSION could reach that path with the previous release's checksum and every offline check would pass"
+    fi
+done
 
 echo
 if [[ "${failures}" -eq 0 ]]; then

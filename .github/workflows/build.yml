@@ -49,6 +49,13 @@ jobs:
       - name: just ci
         run: just ci
 
+      # For the same reason as the step above: a direct push to the default
+      # branch never met ci.yml, so without this a push could change
+      # FCOS_VERSION without its checksum, publish a green image, and leave
+      # `just flash` refusing the download on the operator's machine.
+      - name: Check the pinned Fedora CoreOS release against Fedora's metadata
+        run: just check-installer-pin
+
       # The publish decision, computed once. Every publishing step below tests
       # this output, so the security boundary is written in exactly one place.
       - name: Decide whether to publish
