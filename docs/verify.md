@@ -88,6 +88,31 @@ about. The administrator account is created from the password in your configurat
 After logging in you land on a working dashboard with the machine's own Docker engine already
 connected. There is no environment to add.
 
+## Optional: confirm the machine will keep itself updated
+
+**Skip this if you like — nothing here needs it, and the machine works either way.** It is worth
+ten seconds because of *what it checks*, not how likely it is to fail.
+
+The machine installs its own updates overnight, and it only does that if it can verify that an
+update is signed by this repository's key. Whether it can was decided once, during installation,
+and is never revisited. If that came out wrong, everything you have just seen still looks
+perfect — it installed, it serves, you logged in — and the machine then refuses every update for
+the rest of its life. Nothing on the dashboard would ever tell you. This is the one moment you
+have a reason to look.
+
+```bash
+ssh <your login account>@<the machine's address> \
+  "bootc status --json | jq -r '.status.booted.image.image.signature'"
+```
+
+**You want it to print `containerPolicy`.** Anything else — `null`, `none`, or an error — means
+the machine will not install updates, and reflashing is the fix rather than anything you can
+change on the machine. That is the same field, read the same way, that the machine itself checks
+before every update; there is no second opinion to get.
+
+That refusal is deliberate. The alternative was a machine that updates itself from the internet
+without checking who signed the update.
+
 ## How long
 
 The honest answer is that it depends on two things nobody can predict for you: how fast the
