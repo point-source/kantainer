@@ -142,6 +142,23 @@ refuses "refuses a wireless passphrase with no network" "KANTAINER_WIFI_SSID" \
 refuses "refuses a passphrase WPA-PSK would not accept" "KANTAINER_WIFI_PASSPHRASE" \
     "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=short"
 
+# WPA-PSK's 8-63 counts OCTETS. Thirty-two of these is 32 characters and 64
+# bytes: a character count accepts it, the supplicant does not, and the headless
+# machine never joins the network with nobody there to see why.
+refuses "refuses a passphrase that is short in characters but too long in bytes" "KANTAINER_WIFI_PASSPHRASE" \
+    "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=áááááááááááááááááááááááááááááááá"
+
+# ...and the same rule must not reject a passphrase that is legal in bytes.
+accepts "accepts a non-ASCII passphrase that fits in the byte limit" \
+    "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=café-córrect-horse"
+
+# The installer matches this string against `lsblk --nodeps`, which only ever
+# reports /dev/<kernel name>. A by-id symlink is the stable form a careful person
+# reaches for, and it would pass a looser check here and then strand the install
+# on the machine, hours later, with nobody watching.
+refuses "refuses a drive named by a symlink the installer cannot resolve" "KANTAINER_TARGET_DRIVE" \
+    "KANTAINER_TARGET_DRIVE=/dev/disk/by-id/nvme-Samsung_SSD_980_1TB_S1234567890"
+
 refuses "refuses a misspelt field rather than ignoring it" "KANTAINER_USERNMAE" \
     "KANTAINER_USERNMAE=operator"
 

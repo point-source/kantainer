@@ -139,10 +139,17 @@ kantainer_validate_config() {
     # happily and then refuses on a machine that has already been carried to
     # wherever it lives, with nobody watching (SPEC.md §spec:drive-selection).
     if [[ -n "${KANTAINER_TARGET_DRIVE}" ]]; then
-        [[ "${KANTAINER_TARGET_DRIVE}" == /dev/* ]] ||
-            kantainer_fail "KANTAINER_TARGET_DRIVE is not a device path: ${KANTAINER_TARGET_DRIVE}
-    Name it as the machine will see it, e.g. /dev/sda or /dev/nvme0n1, or leave
-    it blank to install to the machine's only drive."
+        # Exactly /dev/<name>, with nothing further to descend. The installer
+        # matches this string against `lsblk --nodeps` output, which is always
+        # /dev/<kernel name> - so a symlink directory like /dev/disk/by-id/... is
+        # accepted by a looser check here and then refused on the machine, hours
+        # later, with nobody watching. Deciding it here is the whole point of
+        # this validator (SPEC.md §spec:drive-selection).
+        [[ "${KANTAINER_TARGET_DRIVE}" =~ ^/dev/[^/]+$ ]] ||
+            kantainer_fail "KANTAINER_TARGET_DRIVE is not a device path the installer can match: ${KANTAINER_TARGET_DRIVE}
+    Name it as the machine's kernel will, e.g. /dev/sda or /dev/nvme0n1 - not a
+    /dev/disk/by-id/ or /dev/disk/by-path/ symlink, which the installer does not
+    resolve. Leave it blank to install to the machine's only drive."
     fi
 
     # Wireless is optional as a pair. Half of it renders a profile that cannot
@@ -157,11 +164,20 @@ kantainer_validate_config() {
     fi
 
     if [[ -n "${KANTAINER_WIFI_SSID}" ]]; then
-        [[ "${#KANTAINER_WIFI_PASSPHRASE}" -ge "${KANTAINER_MIN_PASSPHRASE_LENGTH}" &&
-           "${#KANTAINER_WIFI_PASSPHRASE}" -le "${KANTAINER_MAX_PASSPHRASE_LENGTH}" ]] ||
-            kantainer_fail "KANTAINER_WIFI_PASSPHRASE must be ${KANTAINER_MIN_PASSPHRASE_LENGTH}-${KANTAINER_MAX_PASSPHRASE_LENGTH} characters
+        # Measured in BYTES, not characters. WPA-PSK's 8-63 is a bound on octets,
+        # and bash's ${#var} counts characters in the caller's locale - so a
+        # passphrase with any multi-byte character passes a character count and
+        # then exceeds the real limit, and the headless machine silently never
+        # joins the network. LC_ALL=C is what makes ${#} count bytes.
+        local passphrase_bytes
+        passphrase_bytes="$(LC_ALL=C printf '%s' "${KANTAINER_WIFI_PASSPHRASE}" | wc -c)"
+
+        [[ "${passphrase_bytes}" -ge "${KANTAINER_MIN_PASSPHRASE_LENGTH}" &&
+           "${passphrase_bytes}" -le "${KANTAINER_MAX_PASSPHRASE_LENGTH}" ]] ||
+            kantainer_fail "KANTAINER_WIFI_PASSPHRASE must be ${KANTAINER_MIN_PASSPHRASE_LENGTH}-${KANTAINER_MAX_PASSPHRASE_LENGTH} bytes (it is ${passphrase_bytes})
     That range is WPA-PSK's, not ours: the machine's supplicant refuses anything
-    outside it."
+    outside it. It counts bytes, so an accented or non-Latin character costs more
+    than one."
     fi
 
     kantainer_refuse_if_publishable "${1:-}"
