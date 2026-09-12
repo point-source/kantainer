@@ -210,12 +210,54 @@ check_links() {
     done
 }
 
+# The image tells the world its license through an OCI label, and the repository
+# tells a reader through a file. Those are two copies of one fact, published to
+# different audiences, and a label asserting a license the repository does not
+# carry is the specific thing the project template did before this repository
+# removed it. Both are exact strings here, so the agreement is decidable.
+check_license() {
+    local root="$1" labelled
+
+    # `|| true` because no match is the case this check exists to report. Without
+    # it grep's exit 1 propagates through pipefail and kills the script here, and
+    # the missing label is announced by silence.
+    labelled="$(grep -oE 'org\.opencontainers\.image\.licenses=[A-Za-z0-9.+-]+' "${root}/Justfile" |
+        head -n 1 | cut -d = -f 2 || true)"
+
+    [[ -n "${labelled}" ]] || {
+        note_failure "the Justfile sets no org.opencontainers.image.licenses label, so the published image claims no license while the repository carries one"
+        return
+    }
+
+    [[ -f "${root}/LICENSE" ]] || {
+        note_failure "the image is labelled ${labelled} but there is no LICENSE file to back it up"
+        return
+    }
+
+    case "${labelled}" in
+        Apache-2.0)
+            if ! grep -qF 'Apache License' "${root}/LICENSE" ||
+                ! grep -qF 'Version 2.0' "${root}/LICENSE"; then
+                note_failure "the image is labelled ${labelled} but LICENSE is not the Apache 2.0 text"
+            fi
+            ;;
+        MIT)
+            grep -qF 'MIT License' "${root}/LICENSE" ||
+                note_failure "the image is labelled ${labelled} but LICENSE is not the MIT text"
+            ;;
+        *)
+            note_failure "the image is labelled ${labelled}, which this check does not know how to confirm against LICENSE - teach it, or the label is unbacked"
+            ;;
+    esac
+}
+
 ### The repository as it stands
 
 check_recipes "${REPO_ROOT}"
 check_paths "${REPO_ROOT}"
 check_owned_names "${REPO_ROOT}"
 check_links "${REPO_ROOT}"
+check_license "${REPO_ROOT}"
 
 if [[ "${failures}" -eq 0 ]]; then
     echo "ok       - the documentation names only things this repository has"
