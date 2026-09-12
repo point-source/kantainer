@@ -1,0 +1,26 @@
+    # NetworkManager profile for the operator's wireless network (SPEC.md
+    # §spec:network-attachment). Appended to butane/kantainer.bu.tmpl's
+    # storage.files list by render-ignition.sh, and only when the config names
+    # a network - a wired machine carries no wireless configuration at all.
+    #
+    # 0600 root:root is required, not tidiness: NetworkManager ignores a keyfile
+    # that any other account can read, and says nothing when it does.
+    #
+    # The filename is fixed rather than derived from the network name. An SSID
+    # may contain slashes and spaces, and sanitising one into a filename is a
+    # problem worth not having - the network is identified by the profile's own
+    # ssid field. It follows that a machine has one wireless network, which is
+    # what §req:constraints scopes: one operator, one machine.
+    #
+    # butane/wireless.nmconnection.tmpl sets no route metric or priority.
+    # §spec:network-attachment wants the wired connection used when one is
+    # present, and preferring wired over wireless is already what
+    # NetworkManager does.
+    - path: /etc/NetworkManager/system-connections/kantainer-wireless.nmconnection
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: kantainer-wireless.nmconnection

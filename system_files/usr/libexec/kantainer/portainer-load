@@ -1,0 +1,39 @@
+#!/bin/bash
+# Load the Portainer image carried inside the OS image into Docker.
+#
+# SPEC.md §spec:portainer-service: Portainer is present on disk before the
+# machine ever boots and is never downloaded onto it. Docker offers no way to
+# share a read-only image store, so the image travels as an archive and is
+# loaded here.
+#
+# Runs on every boot rather than once behind a first-boot stamp, and loads every
+# time rather than checking first - see the reasoning further down. A stamp would
+# have to live in /var and would pin the machine to whichever Portainer it first
+# booted with.
+
+set -oue pipefail
+
+ARCHIVE=/usr/lib/kantainer/portainer.tar
+REF_FILE=/usr/lib/kantainer/portainer-image
+
+read -r IMAGE_REF < "${REF_FILE}"
+
+# THE ARCHIVE IS AUTHORITATIVE, so it is loaded unconditionally.
+#
+# This used to skip the load when the tag was already in Docker's store. The tag
+# is not the answer: Portainer is pinned by tag AND digest, and a digest refresh
+# under an unchanged tag is a normal thing to ship - a rebuilt upstream image, a
+# security fix republished as the same version. Docker's store lives in /var,
+# which survives OS updates, so after such an update the old image is still there
+# under exactly the tag the new one wants. The presence check would skip the
+# load, --pull=never would guarantee nothing ever corrected it, and the machine
+# would serve the previous Portainer forever with nothing anywhere saying so.
+#
+# Comparing identities instead was tried and does not work: a docker-archive's
+# config blob digest is not the image ID Docker reports, so the two sides have no
+# common identifier to compare. Loading every time costs about a second and a
+# half from local disk for a 148 MB archive, on a unit that runs once per boot
+# before Portainer starts. That is the cheaper of the two mistakes.
+echo "portainer-load: loading ${IMAGE_REF} from ${ARCHIVE}"
+docker load --input "${ARCHIVE}"
+docker image inspect "${IMAGE_REF}" > /dev/null

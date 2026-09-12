@@ -1,0 +1,14 @@
+[Unit]
+Description=Load the Portainer image carried in the OS image into Docker
+Documentation=https://github.com/point-source/kantainer
+After=docker.service
+Requires=docker.service
+Before=kantainer-portainer.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/kantainer/portainer-load
+
+[Install]
+WantedBy=multi-user.target

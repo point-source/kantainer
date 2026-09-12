@@ -1,0 +1,108 @@
+#!/bin/bash
+# Put greenboot's boot counter into this machine's bootloader
+# (SPEC.md §spec:boot-health-and-rollback).
+#
+# greenboot supplies everything about rollback except the half that runs before
+# Linux does. Its countdown is a GRUB snippet, 08_greenboot.cfg: decrement
+# boot_counter on every boot, and when it runs out, select the previous
+# deployment. greenboot arms that counter from userspace; GRUB is what honours
+# it.
+#
+# bootupd assembles that snippet into /boot/grub2/grub.cfg only when it INSTALLS
+# a bootloader - `bootupctl backend install --with-static-configs`. `bootupctl
+# update`, which the base image runs on every boot, has no such flag and does
+# not regenerate grub.cfg. So:
+#
+#   qcow2 built here    bootc install runs bootupd against THIS image, whose
+#                       configs.d contains greenboot's snippet. Counter present.
+#   real machines       §spec:installer-media installs Fedora CoreOS and then
+#                       attaches this image. The bootloader was written before
+#                       kantainer existed. Counter ABSENT.
+#
+# Which means that without this, greenboot on a real machine would arm a counter
+# nothing decrements and select a fallback nothing honours. No rollback, on
+# every machine an operator actually owns, with nothing to see: the health check
+# runs, passes, reports green, and the one thing it exists to trigger cannot
+# happen. The test VM would not show it either.
+#
+# The seam is bootupd's own 41_custom.cfg, which sources $prefix/custom.cfg.
+# What gets written there is greenboot's file, copied - not a reimplementation
+# of its logic, which would be our copy to keep correct as greenboot changes.
+#
+# Arguments exist for the tests, which run this against a throwaway /boot. The
+# unit passes none.
+
+set -oue pipefail
+
+BOOT_GRUB="${1:-/boot/grub2}"
+SNIPPET="${2:-/usr/lib/bootupd/grub2-static/configs.d/08_greenboot.cfg}"
+
+GRUB_CFG="${BOOT_GRUB}/grub.cfg"
+CUSTOM_CFG="${BOOT_GRUB}/custom.cfg"
+
+fail() {
+    echo "greenboot-grub-seed: $*" >&2
+    exit 1
+}
+
+[[ -f "${GRUB_CFG}" ]] || fail "no bootloader configuration at ${GRUB_CFG}"
+
+# Already counting. This is the qcow2 path, where bootupd installed greenboot's
+# snippet directly. Writing custom.cfg as well would run the countdown TWICE per
+# boot: the machine would roll back after two failed boots instead of three, and
+# the arithmetic would be wrong in the direction that discards working updates.
+if grep -q 'boot_counter' "${GRUB_CFG}"; then
+    echo "greenboot-grub-seed: the bootloader already counts boots"
+    exit 0
+fi
+
+# No counter, and no seam to add one through. Writing custom.cfg would achieve
+# nothing at all, and exiting 0 would tell the operator this machine can roll
+# back when it cannot. A failed unit is the only honest outcome.
+grep -q 'custom\.cfg' "${GRUB_CFG}" ||
+    fail "the bootloader neither counts boots nor sources custom.cfg
+    ${GRUB_CFG} was written by something that carries neither greenboot's
+    snippet nor bootupd's 41_custom.cfg seam, so there is nowhere to put the
+    boot counter. This machine cannot roll back a bad update until that is
+    fixed."
+
+[[ -f "${SNIPPET}" ]] ||
+    fail "greenboot's boot-counter snippet is missing from ${SNIPPET}
+    It ships with the greenboot package. Without it there is nothing to install,
+    and this machine cannot roll back a bad update."
+
+# Runs on every boot, so do nothing when there is nothing to do.
+if cmp -s "${SNIPPET}" "${CUSTOM_CFG}"; then
+    echo "greenboot-grub-seed: ${CUSTOM_CFG} is already greenboot's snippet"
+    exit 0
+fi
+
+# /boot is mounted read-only on Fedora CoreOS. Remount only if it actually is
+# read-only, and put it back the way it was found - the same dance greenboot
+# does for the same directory, and the reason the tests can run this against an
+# ordinary directory without any of it happening.
+boot_mount="$(findmnt -n -o TARGET --target "${BOOT_GRUB}")"
+readonly_boot=0
+if findmnt -n -o OPTIONS --target "${BOOT_GRUB}" | grep -qE '(^|,)ro(,|$)'; then
+    readonly_boot=1
+    mount -o remount,rw "${boot_mount}"
+fi
+
+# An `if` rather than `[[ ... ]] &&`: this runs on EXIT, and the trap's own exit
+# status becomes the script's. A false `&&` would have reported failure from a
+# run that succeeded, and the unit would have gone red on every healthy machine.
+restore_boot() {
+    if [[ "${readonly_boot}" -eq 1 ]]; then
+        mount -o remount,ro "${boot_mount}"
+    fi
+}
+trap restore_boot EXIT
+
+install -m 0700 "${SNIPPET}" "${CUSTOM_CFG}"
+
+# Assert what was written. A silent failure here is a machine that reports a
+# healthy boot and has no rollback behind it.
+cmp -s "${SNIPPET}" "${CUSTOM_CFG}" ||
+    fail "wrote ${CUSTOM_CFG} but it does not match ${SNIPPET}"
+
+echo "greenboot-grub-seed: installed greenboot's boot counter at ${CUSTOM_CFG}"

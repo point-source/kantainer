@@ -1,0 +1,194 @@
+# The machine specification, rendered by scripts/render-ignition.sh from the
+# operator's kantainer.conf. This file is a template, not a valid config on its
+# own: @@NAME@@ placeholders are replaced with JSON-quoted values.
+#
+# Secrets are never substituted into this text. The Portainer password, the
+# wireless keyfile and the signing policy are staged as files and pulled in with
+# `local:`, so nothing here has to be escaped for YAML and no password ever
+# passes through a sed expression. The one value substituted into the body is
+# @@ATTACH_IMAGE@@, the published image reference from image.env - which is not
+# the operator's to write, and which render-ignition.sh refuses unless it is the
+# shape of a registry reference.
+#
+# SPEC VERSION. fcos 1.6.0 (Ignition 3.5.0), deliberately not the newest butane
+# accepts. fcos 1.7.0 emits Ignition 3.6.0, which Ignition marked stable in
+# 2.26.0 - exactly the release versions.env pins, so a config using it would
+# work on that release and no earlier one. Everything below has existed since
+# spec 1.0.0, so the newer spec buys nothing and spends the margin.
+variant: fcos
+version: 1.6.0
+
+passwd:
+  users:
+    # The login account, and the key it accepts (SPEC.md §spec:remote-access).
+    # wheel and sudo are what Fedora CoreOS gives its own `core` user: remote
+    # access exists for "the rare occasion something needs looking at", and an
+    # account that cannot become root cannot do that.
+    - name: @@USERNAME@@
+      ssh_authorized_keys:
+        - @@SSH_PUBLIC_KEY@@
+      groups:
+        - wheel
+        - sudo
+
+systemd:
+  units:
+    # The second stage: attach this machine to its own image and reboot
+    # (SPEC.md §spec:installer-media).
+    #
+    # The installer writes stock Fedora CoreOS, because uCore ships no installer
+    # of its own and cannot be installed directly. This is the step that turns
+    # the result into a kantainer machine, and it is the last thing that happens
+    # without the operator: after this reboot, Portainer is serving.
+    #
+    # `ostree-image-signed:` verifies the image against
+    # /etc/containers/policy.json, which this same configuration places below.
+    # An image without a valid signature from this repository's key is refused
+    # and the machine stays on Fedora CoreOS - so the machine's FIRST attachment
+    # is verified exactly like every later update (§spec:os-updates), rather
+    # than taking the image on trust once and checking from then on.
+    #
+    # DO NOT CHANGE THAT PREFIX WITHOUT READING THIS. The verification mode is
+    # chosen HERE, once, and recorded in the deployment origin; every later
+    # update inherits it and never revisits it. `ostree-image-signed:` records
+    # it as `containerPolicy`, which is exactly what update-preflight
+    # (§spec:os-updates) requires before it will let this machine update at all.
+    #
+    # `ostree-unverified-registry:` - which uCore's own autorebase example uses
+    # for its first pass, so it is the obvious thing to copy - records
+    # `ContainerPolicyAllowInsecure` instead. A machine attached that way
+    # installs, serves, and then refuses every update for the rest of its life,
+    # with nothing wrong on the screen. The equivalent for `bootc switch` is
+    # --enforce-container-sigpolicy; both land on the same recorded mode.
+    #
+    # --bypass-driver because Fedora CoreOS's own update driver owns rpm-ostree
+    # and would otherwise refuse the transaction. This is the command uCore
+    # documents for this transition; it is not a workaround of ours.
+    #
+    # THE CONDITION IS A FACT ABOUT THE RUNNING SYSTEM, NOT A STAMP WE LEFT.
+    # /usr/lib/kantainer/os-image exists only inside the kantainer image, so
+    # this unit runs on every boot until the machine actually is that image -
+    # which also means a failed attachment is retried on the next boot rather
+    # than needing someone to notice. A stamp file would not work: the rebase
+    # merges /etc into the new deployment as part of its own transaction, so
+    # anything written afterwards stays behind and the machine would attach,
+    # reboot, and attach all over again.
+    - name: kantainer-attach.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=kantainer: attach this machine to its own image
+        ConditionPathExists=!/usr/lib/kantainer/os-image
+        Wants=network-online.target
+        After=network-online.target
+
+        [Service]
+        Type=oneshot
+        # The operator may be watching a screen, and will certainly want the
+        # journal afterwards if they were not.
+        StandardOutput=journal+console
+        StandardError=journal+console
+        ExecStart=/usr/bin/rpm-ostree rebase --bypass-driver ostree-image-signed:docker://@@ATTACH_IMAGE@@
+        # --no-block: this unit is part of the transaction systemd is about to
+        # run, so waiting for the job would be waiting for ourselves.
+        ExecStart=/usr/bin/systemctl --no-block reboot
+
+        [Install]
+        WantedBy=multi-user.target
+
+storage:
+  files:
+    # THE SIGNING MATERIAL, PLACED DURING INSTALLATION.
+    #
+    # The three files below are what make the attachment above verifiable. They
+    # have to be here rather than in the image, because at the moment they are
+    # needed the machine is still stock Fedora CoreOS and the image has not
+    # arrived yet. The published image carries its own identical copies, written
+    # by build_files/build.sh from build_files/policy-lib.sh - the same
+    # generator scripts/render-ignition.sh uses to produce these, so the two
+    # cannot disagree.
+    #
+    # KNOWN CONSEQUENCE, ACCEPTED. ostree carries /etc forward as local
+    # modification, so after the rebase these copies shadow the image's own for
+    # the life of the machine. Two effects, both deliberate:
+    #
+    #   - the image's ghcr.io/ublue-os scope is not present on the installed
+    #     machine. It costs nothing: an installed machine only ever pulls
+    #     ghcr.io/point-source/kantainer.
+    #   - a later change to the image's policy does not reach a machine that is
+    #     already installed. Reflashing is what changes it. If the signing key
+    #     is ever rotated, such a machine stops updating rather than accepting
+    #     the new key silently - it fails closed.
+    - path: /etc/pki/containers/kantainer.pub
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: kantainer.pub
+
+    - path: /etc/containers/policy.json
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: policy.json
+
+    # Without this, containers/image never looks for a cosign signature, finds
+    # none, and the policy above refuses an image that is in fact signed.
+    - path: /etc/containers/registries.d/kantainer.yaml
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: kantainer-registries.yaml
+
+    # SPEC.md §spec:remote-access: password authentication is refused for every
+    # account - refused outright, not merely left unset, so that a later change
+    # which sets a password somewhere cannot quietly open a door.
+    #
+    # The number is low on purpose. sshd uses the FIRST value it reads for a
+    # keyword and processes sshd_config.d in lexical order, so the lowest-
+    # numbered drop-in is the authoritative one. Fedora CoreOS ships its own
+    # 40-disable-passwords.conf saying the same thing; at 10 this file wins over
+    # that one and over anything added later, which is the point.
+    #
+    # Both keywords are set because they are two different doors:
+    # KbdInteractiveAuthentication reaches PAM's password prompt even when
+    # PasswordAuthentication is off.
+    - path: /etc/ssh/sshd_config.d/10-kantainer-no-passwords.conf
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+
+    # The Portainer administrator password, in plain text
+    # (SPEC.md §spec:machine-configuration). Batch 2 reads this exact path to
+    # create the administrator before Portainer's interface accepts its first
+    # connection - do not rename it.
+    #
+    # No trailing newline: the file is the password and nothing else, so a
+    # reader can use its whole contents without having to strip anything.
+    - path: /etc/kantainer/portainer-admin-password
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: portainer-admin-password
+
+    # KEEP THE FILES LIST LAST. render-ignition.sh appends
+    # butane/wireless.bu.tmpl here, as a further entry of this list, when and
+    # only when the operator's config names a wireless network. Anything added
+    # below would land inside the appended fragment instead.

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+  ],
+
+  "rebaseWhen": "never",
+
+  // Fedora CoreOS is not a container image and has no native Renovate datasource,
+  // so its own build index stands in as one. `.builds[].id` is the list of
+  // published releases for a stream, newest first.
+  "customDatasources": {
+    "fedora-coreos": {
+      "defaultRegistryUrlTemplate": "https://builds.coreos.fedoraproject.org/prod/streams/{{packageName}}/builds/builds.json",
+      "format": "json",
+      "transformTemplates": ["{ \"releases\": builds.{ \"version\": id } }"],
+    },
+  },
+
+  // versions.env is not a format Renovate understands natively, but three of its
+  // pins have to move on their own - an untracked pin is how a machine stays on a
+  // version with a known authentication bypass, and how the installer half of this
+  // system quietly ages out from under the image half.
+  "customManagers": [
+    // Portainer. Both halves of the pin are captured in one match so Renovate
+    // rewrites the tag and the digest together - they must never drift.
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "PORTAINER_IMAGE=(?<depName>.*?)\\nPORTAINER_TAG=(?<currentValue>.*?)\\nPORTAINER_DIGEST=(?<currentDigest>.*?)\\n",
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+    },
+
+    // The tool `just flash` personalises the installer with. An ordinary container
+    // image, so tag and digest move together exactly like Portainer's.
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "COREOS_INSTALLER_IMAGE=(?<depName>.*?)\\nCOREOS_INSTALLER_TAG=(?<currentValue>.*?)\\nCOREOS_INSTALLER_DIGEST=(?<currentDigest>.*?)\\n",
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+    },
+
+    // The Fedora CoreOS release the installer media is built from.
+    //
+    // FCOS_ISO_SHA256 is deliberately NOT captured here. It is the checksum of a
+    // 1.3 GB ISO and Renovate cannot compute it, so a bump lands with the previous
+    // release's checksum beside the new version. `just check-installer-pin` - a
+    // step of its own in ci.yml, because it needs the network - fails the pull
+    // request until a human pastes the right one in. That is the same arrangement
+    // the base image already has below, and for the same reason.
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "FCOS_STREAM=(?<packageName>.*?)\\nFCOS_VERSION=(?<currentValue>.*?)\\n",
+      ],
+      "datasourceTemplate": "custom.fedora-coreos",
+      "versioningTemplate": "loose",
+      "depNameTemplate": "fedora-coreos",
+    },
+  ],
+
+  "packageRules": [
+    // Pinning action SHAs is mechanical and safe to land unattended.
+    {
+      "automerge": true,
+      "matchUpdateTypes": ["pin", "pinDigest"],
+    },
+
+    // The base image is deliberately NOT automerged, and has no custom manager of
+    // its own: Renovate rewrites the FROM line in the Containerfile natively. The
+    // same pin is also recorded as UCORE_IMAGE/UCORE_TAG/UCORE_DIGEST in
+    // versions.env, which Renovate does not know about, so `just ci` fails the
+    // pull request until a human updates versions.env to match - which is the
+    // point, not an annoyance.
+    {
+      "matchFileNames": ["Containerfile"],
+      "automerge": false,
+      "addLabels": ["base-image"],
+      "description": "Update versions.env in the same pull request, or `just ci` will fail.",
+    },
+
+    // The installer half of the system moves WEEKLY, not on Renovate's usual
+    // cadence. Neither pin is a security-response path: the Fedora CoreOS release
+    // is replaced by the kantainer image minutes after it installs, and
+    // coreos-installer only ever runs on the operator's own machine. What they are
+    // guarding against is a slow drift measured in months, so a pull request every
+    // Monday is the right amount of noise for it. Portainer is deliberately NOT
+    // slowed down - it serves the admin interface and its fixes should arrive as
+    // fast as Renovate can offer them.
+    //
+    // Neither is automerged: a Fedora CoreOS bump needs its checksum updated by
+    // hand in the same pull request, and a coreos-installer bump changes the tool
+    // that writes a bootable stick.
+    {
+      "matchDatasources": ["custom.fedora-coreos"],
+      "schedule": ["before 4am on monday"],
+      "automerge": false,
+      "addLabels": ["installer-media"],
+      "description": "Update FCOS_ISO_SHA256 in the same pull request, or `just check-installer-pin` will fail.",
+    },
+    {
+      "matchPackageNames": ["quay.io/coreos/coreos-installer"],
+      "schedule": ["before 4am on monday"],
+      "automerge": false,
+      "addLabels": ["installer-media"],
+    },
+
+    // Container references inside workflow files stay on their floating tags.
+    {
+      "enabled": false,
+      "matchUpdateTypes": ["digest", "pinDigest", "pin"],
+      "matchDepTypes": ["container"],
+      "matchFileNames": [".github/workflows/**.yaml", ".github/workflows/**.yml"],
+    },
+  ],
+}

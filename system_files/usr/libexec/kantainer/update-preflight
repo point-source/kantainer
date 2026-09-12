@@ -1,0 +1,75 @@
+#!/bin/bash
+# Refuse to update unless this machine verifies what it is about to install
+# (SPEC.md §spec:os-updates).
+#
+# The build bakes a signing policy into the image: a sigstoreSigned entry for
+# the published reference, the repository's public key at
+# /etc/pki/containers/kantainer.pub, and the docker transport default set to
+# reject. That policy is necessary and it is not sufficient, because bootc does
+# not consult it by default. From `bootc switch --help`:
+#
+#   --enforce-container-sigpolicy
+#       This is the inverse of the previous `--target-no-signature-verification`
+#       (which is now a no-op).
+#
+# The mode is chosen when the machine is ATTACHED to the image and recorded in
+# the deployment origin; `bootc upgrade` inherits it and never revisits it. So a
+# machine attached without that flag pulls its nightly update with no signature
+# check at all, and every part of the policy above sits there unread. Nothing on
+# the machine fails, nothing is logged, and the operator sees a healthy box
+# updating itself from a network location that could be anyone.
+#
+# This asks bootc what mode it is actually in and refuses to update if the
+# answer is not "the container signing policy". bootc's own status is the
+# verdict; the policy file is not re-read or re-derived here, because a second
+# implementation of that judgement is the one that goes stale.
+#
+# It fails CLOSED, including on a status shape it does not recognise. A machine
+# that stops updating says so - `systemctl status bootc-fetch-apply-updates`
+# carries this text. A machine that updates unsigned says nothing, forever.
+
+set -oue pipefail
+
+if ! status="$(bootc status --json 2> /dev/null)"; then
+    cat >&2 <<'MSG'
+Update refused: `bootc status` did not report this machine's state.
+
+Without it there is no way to tell whether this machine verifies the signature
+on the image it is about to install, and installing without knowing is how an
+unattended machine ends up running someone else's image.
+
+Run `bootc status` on this machine to see what it says.
+MSG
+    exit 1
+fi
+
+signature="$(jq -r '.status.booted.image.image.signature // "none"' <<< "${status}")"
+
+if [[ "${signature}" != "containerPolicy" ]]; then
+    # The reference comes from the machine's own status, never from a literal
+    # here. image.env is this project's single source for the published
+    # reference (§spec:image-publication), and a copy of it written into a
+    # shipped script is a copy that can disagree with the policy the image
+    # carries - which is the failure that policy exists to prevent.
+    booted="$(jq -r '.status.booted.image.image.image // "the published kantainer image"' <<< "${status}")"
+
+    cat >&2 <<MSG
+Update refused: this machine does not verify the signature on its updates.
+
+  bootc reports its signature mode as: ${signature}
+  This image's updates require:        containerPolicy
+
+The signing policy and the repository's public key are baked into the image, but
+bootc only consults them when the machine was attached to the image with
+--enforce-container-sigpolicy. This machine was not, so its nightly update would
+install whatever the registry served, signed or not.
+
+Updates stay stopped until that is fixed. To fix it, re-attach this machine to
+the image it is already running, with verification on:
+
+  bootc switch --enforce-container-sigpolicy ${booted}
+
+then reboot. Reinstalling from a current installer does the same thing.
+MSG
+    exit 1
+fi

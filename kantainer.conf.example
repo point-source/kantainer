@@ -1,0 +1,68 @@
+# kantainer machine configuration — EXAMPLE
+#
+# Copy this file, fill in your own values, and keep your copy:
+#
+#     cp kantainer.conf.example kantainer.conf
+#     $EDITOR kantainer.conf
+#     just config-check
+#
+# This is the only place machine-specific values live (SPEC.md
+# §spec:machine-configuration). Everything else belongs in the image. Keep the
+# filled-in copy — regenerating a USB stick needs it.
+#
+# kantainer.conf is git-ignored and MUST STAY OUT of this repository. The
+# repository is public and your copy carries a password in plain text
+# (REQUIREMENTS.md §req:quality-attributes).
+#
+# FORMAT — one KEY=value per line. The value is everything after the first `=`,
+# taken literally to the end of the line. No quotes, no escapes, no shell
+# expansion: a password containing $ ` " ' \ or spaces is written exactly as it
+# reads. Trailing spaces are part of the value, so do not add any. Blank lines
+# and lines starting with # are ignored.
+
+
+### Required
+
+# The login account created on the machine. A Linux user name: lower-case
+# letters, digits, underscore and dash, starting with a letter or underscore.
+KANTAINER_USERNAME=
+
+# The SSH PUBLIC key that account accepts — one line, the whole contents of
+# your .pub file. This is the only way in: the machine refuses password logins
+# for every account (SPEC.md §spec:remote-access). Never put the private key
+# here.
+#
+#     cat ~/.ssh/id_ed25519.pub
+#
+# Shape: ssh-ed25519 AAAAC3Nz...  you@example
+KANTAINER_SSH_PUBLIC_KEY=
+
+# The Portainer administrator password, at least 12 characters — the minimum
+# Portainer accepts without forcing a change at first login.
+#
+# Required, not optional. Current Portainer will not create its first
+# administrator without a token it prints only to its own log, so leaving this
+# blank means you cannot claim the account from a browser at all (SPEC.md
+# §spec:machine-configuration).
+KANTAINER_PORTAINER_PASSWORD=
+
+
+### Optional
+
+# The drive to install to, e.g. /dev/sda or /dev/nvme0n1. Leave blank on a
+# single-drive machine. On a machine with more than one drive, leaving this
+# blank means the installer stops and asks rather than erasing one
+# (SPEC.md §spec:drive-selection).
+KANTAINER_TARGET_DRIVE=
+
+# Wireless network. Leave BOTH blank on a wired machine — a wired machine
+# carries no wireless configuration at all, and wired DHCP needs none. Set
+# both or neither (SPEC.md §spec:network-attachment).
+#
+# Installation itself is always wired, even for a machine that will run on
+# wireless afterwards: the installer is stock Fedora CoreOS and has no wireless
+# support. Install on ethernet once, then move the machine.
+KANTAINER_WIFI_SSID=
+
+# The WPA passphrase for that network, 8–63 characters.
+KANTAINER_WIFI_PASSPHRASE=

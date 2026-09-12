@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The machine's firewall (SPEC.md §spec:container-engine): SSH and Portainer's
+  HTTPS interface, nothing else.
+
+  This lives in /usr/lib rather than /etc because it belongs to the image.
+  firewalld reads /usr/lib/firewalld/zones for default and vendor configuration
+  and /etc/firewalld/zones for local customisation, so an operator can shadow
+  this file by name without the image and their change fighting each other.
+
+  Narrower than the FedoraServer zone it replaces, which uCore makes the default.
+  Deliberately dropped from that zone:
+
+    cockpit (9090/tcp)   - uCore's cockpit is a disabled-by-default podman unit
+                           and nothing here serves it.
+    dhcpv6-client (546)  - the cost is real: a network that hands out IPv6 by
+                           DHCPv6 will not give this machine an IPv6 address.
+                           IPv4 DHCP is unaffected, and so is IPv6 SLAAC.
+                           §req:quality-attributes scopes this to a home network
+                           that assigns addresses automatically, which is IPv4
+                           DHCP in practice.
+
+  What this zone does NOT do: constrain containers. A published container port
+  is DNAT'd and forwarded rather than delivered to INPUT, so it never meets these
+  rules. Portainer's 9443 is reachable because it is published, and the entry
+  below is defence in depth and documentation. The control over Portainer's
+  agent-tunnel (8000) and plain-HTTP (9000) interfaces is that neither is
+  published - see kantainer-portainer.service.
+
+  <forward/> is kept exactly as the FedoraServer zone has it. It is not a port,
+  so it is outside what this zone narrows, and changing forwarding semantics at
+  the same time as the port list would be two changes wearing one hat - with
+  Docker's own FORWARD chains on the other side of it.
+-->
+<zone>
+  <short>kantainer</short>
+  <description>Container host: SSH and the Portainer HTTPS interface only.</description>
+  <service name="ssh"/>
+  <port port="9443" protocol="tcp"/>
+  <forward/>
+</zone>

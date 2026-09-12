@@ -1,0 +1,20 @@
+# Tooling for `just ci`. The same versions on the operator's machine and in CI,
+# so a green gate locally means a green gate on a pull request.
+#
+# The gate also uses the system's git, jq and openssl, plus python3 and GLib -
+# the tests read the rendered NetworkManager profile back through GLib's own
+# key-file parser rather than trusting the bytes we wrote.
+#
+# Install with: mise install
+
+[tools]
+just = "1.58.0"
+hadolint = "2.15.1"
+shellcheck = "0.11.0"
+actionlint = "1.7.12"
+yamllint = "1.38.0"
+cosign = "3.1.3"
+
+# Renders butane/*.bu.tmpl into the Ignition config `just flash` embeds. Not in
+# mise's default registry, so it comes from the aqua backend.
+"aqua:coreos/butane" = "0.29.0"

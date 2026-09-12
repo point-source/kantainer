@@ -1,0 +1,19 @@
+[Unit]
+Description=Install greenboot's boot counter into this machine's bootloader
+Documentation=https://github.com/point-source/kantainer
+ConditionPathExists=/run/ostree-booted
+RequiresMountsFor=/boot
+
+# greenboot arms GRUB's boot counter when an update is finalised at shutdown,
+# and the health check clears it after a good boot. Both are pointless on a
+# bootloader that carries no countdown, so this runs first
+# (SPEC.md §spec:boot-health-and-rollback).
+Before=greenboot-healthcheck.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/kantainer/greenboot-grub-seed
+
+[Install]
+WantedBy=multi-user.target
