@@ -562,6 +562,25 @@ signing time and would otherwise strand every installed machine at once.
 The installer image is not published. It is produced by the operator's flash command from
 the pinned Fedora CoreOS release and their configuration file.
 
+Every pinned version has something that moves it, and the repository refuses to let a new pin
+be added without one — an unwatched pin does not fail, it simply stops being current until the
+day somebody needs it to be, which for the installer half means a stick built from a release
+old enough not to recognise the hardware in front of it. The container pins are raised
+automatically. The Fedora CoreOS release is raised automatically too, but its checksum cannot
+be: no bot can hash a 1.3 GB image, so a raise lands with the previous release's checksum
+beside the new version, and every offline check in the repository passes on it. A separate
+check compares the pin against Fedora's own published metadata and fails the pull request until
+the checksum is corrected. It is kept out of the repository's main gate deliberately — that
+gate is offline so it runs anywhere, and a check needing a Fedora server would make it fail on
+a train.
+
+The installer pins are raised weekly rather than as often as the bot would offer. Neither is a
+security-response path — the Fedora CoreOS release is replaced by the kantainer image minutes
+after it installs, and the personalisation tool only ever runs on the operator's own machine —
+so what they guard against is drift measured in months. Portainer is deliberately not slowed
+down: it serves the administrative interface, and its fixes should arrive as fast as they are
+offered.
+
 **Decision and constraint.** §req:success-criteria item 11 asks that a push produce both a
 new published image and a new installer image with no manual step. The first half is met.
 The second is not met as written, and cannot be: an installer image is only useful once it

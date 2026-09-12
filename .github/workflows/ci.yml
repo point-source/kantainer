@@ -27,3 +27,10 @@ jobs:
 
       - name: just ci
         run: just ci
+
+      # Separate from `just ci` because it reaches the network, which that gate
+      # deliberately does not. This is what makes a Renovate pull request that
+      # raised FCOS_VERSION without its checksum go red here rather than on the
+      # operator's machine, after a 1.3 GB download.
+      - name: Check the pinned Fedora CoreOS release against Fedora's metadata
+        run: just check-installer-pin

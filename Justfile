@@ -87,6 +87,16 @@ lint-yaml:
 check-pins:
     ./scripts/check-pins.sh
 
+# Check the pinned Fedora CoreOS release against Fedora's own metadata.
+#
+# DELIBERATELY NOT PART OF `just ci`: it reaches the network, and `just ci` is
+# offline and deterministic so it runs anywhere. This runs as its own step in
+# .github/workflows/ci.yml. Run it by hand after moving FCOS_VERSION - it prints
+# the checksum to paste into versions.env.
+[group('Lint')]
+check-installer-pin:
+    ./scripts/check-installer-pin.sh
+
 # Run the repository's tests - every scripts/test-*.sh, so a new test file
 # is picked up by adding it rather than by remembering to list it here
 [group('Lint')]
@@ -151,6 +161,9 @@ build $target_image=image_name $tag=default_tag:
     LABELS+=("--label" "org.opencontainers.image.description={{ image_desc }}")
     LABELS+=("--label" "org.opencontainers.image.title={{ image_name }}")
     LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
+    # Matches the LICENSE file this repository carries, which matches uCore's.
+    # Asserted by scripts/test-docs.sh so the label and the file cannot diverge.
+    LABELS+=("--label" "org.opencontainers.image.licenses=Apache-2.0")
 
     podman build "${LABELS[@]}" --pull=newer --tag "${target_image}:${tag}" --file Containerfile .
 
