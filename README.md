@@ -40,13 +40,43 @@ Published images are signed with cosign, and the machine refuses to install an i
 not (SPEC.md §spec:os-updates). The public key is committed as `cosign.pub` and baked into the
 image's container-signing policy.
 
-The matching private key is **not** in this repository and must never be. Publishing needs it
-as a repository secret named `SIGNING_SECRET`, set once:
+The matching private key is **not** in this repository and must never be. It lives in one place
+only: a repository secret named `SIGNING_SECRET`.
+
+### Creating the signing key
+
+Do this **on a machine you control**, not in a build agent or a throwaway checkout. This keypair
+is the project's root of trust: every machine you ever install decides whether to accept an
+update by checking it.
 
 ```bash
-COSIGN_PASSWORD="" cosign generate-key-pair   # writes cosign.key and cosign.pub
-gh secret set SIGNING_SECRET < cosign.key     # then commit cosign.pub, and keep cosign.key safe
+cd <this repository>
+rm -f cosign.key cosign.pub                   # replacing an existing pair? clear it out first
+COSIGN_PASSWORD="" cosign generate-key-pair   # writes cosign.key and cosign.pub here
+gh secret set SIGNING_SECRET < cosign.key     # the private half, into the repository secret
+git add cosign.pub && git commit -m "chore(signing): rotate the image signing key"
 ```
 
-`cosign.key` is gitignored. Until `SIGNING_SECRET` is set, the publish workflow's signing step
-fails — deliberately, because an unsigned image is one no machine will install.
+Then put `cosign.key` somewhere you will still have it in two years — a password manager is
+fine — and delete the working copy. `cosign.key` is gitignored, so it will not be committed by
+accident, but nothing stops you from losing it.
+
+`COSIGN_PASSWORD=""` creates an unencrypted private key on purpose: CI has to use it
+unattended, so there is nobody to type a passphrase. That is why where you keep the file
+matters.
+
+### If the private key is lost
+
+Generate a new pair with the steps above and commit the new `cosign.pub`. Nothing else needs to
+change — but be aware of what it costs once machines exist in the field: an installed machine
+carries a copy of the public key from the day it was flashed, so after a rotation it will
+**refuse every update** rather than accept images signed by the new key. Those machines have to
+be reflashed. Before the first machine is installed, rotating costs nothing.
+
+Until `SIGNING_SECRET` is set, the publish workflow's signing step fails — deliberately, because
+an unsigned image is one no machine will install.
+
+## License
+
+[Apache-2.0](LICENSE), matching [uCore](https://github.com/ublue-os/ucore) and the wider
+Universal Blue project this image is built from.
