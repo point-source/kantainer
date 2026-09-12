@@ -48,6 +48,12 @@ expect 1 "rejects a tag that disagrees with versions.env" \
 expect 1 "rejects a floating base tag with no digest" \
     "sed -i 's|^FROM ghcr.io/ublue-os/ucore-minimal.*|FROM ghcr.io/ublue-os/ucore-minimal:stable|' Containerfile"
 
+# Agreement is not the same as being a digest. Both files can carry the same
+# nonsense and agree perfectly, which is why the shape is checked on its own.
+expect 1 "rejects a base digest that is not a digest, even when both files agree" \
+    "sed -i 's|@sha256:[0-9a-f]*|@sha256:latest|' Containerfile
+     sed -i 's|^UCORE_DIGEST=.*|UCORE_DIGEST=sha256:latest|' versions.env"
+
 expect 1 "rejects a base image that disagrees with versions.env" \
     "sed -i 's/^UCORE_IMAGE=.*/UCORE_IMAGE=ghcr.io\/ublue-os\/ucore/' versions.env"
 

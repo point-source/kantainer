@@ -81,6 +81,12 @@ from_tag="${from_image_tag##*:}"
     Containerfile: ${from_digest}
     versions.env:  ${UCORE_DIGEST}"
 
+# Agreeing is not the same as being a digest. The case above only asked whether
+# the FROM line contains `@sha256:`, so two files both saying `sha256:latest`
+# agreed with each other and passed - a floating tag wearing a digest's clothes,
+# in the one pin that decides what the whole image is built from.
+require_digest UCORE_DIGEST
+
 # Portainer is pulled by digest alone - skopeo refuses a reference carrying both
 # a tag and a digest, so the tag beside it is documentation and the digest is the
 # only thing that decides which bytes ship. A digest that is not a digest would
