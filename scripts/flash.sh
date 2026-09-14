@@ -31,57 +31,168 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/versions.env"
 
-# lsblk's own account of a device: type, model, size, and the disk a partition
-# belongs to. It fails when the path is not a block device, which covers a
-# typo'd path and a regular file in one verdict rather than two checks of ours.
-# Replaced by the tests, which have no USB stick.
-kantainer_device_facts() {
-    lsblk --json --nodeps --output TYPE,MODEL,SIZE,PKNAME "$1" 2> /dev/null |
-        jq -r '.blockdevices[0]
-               | [ .type, (.model // "unknown"), (.size // "unknown"), (.pkname // "") ]
-               | @tsv'
+kantainer_host() {
+    uname -s
 }
 
-# Refuses the two mistakes that have an objectively wrong outcome, and prints
-# the model and size of what is left.
-#
-# It does NOT try to work out whether a device is "safe" to erase. There is no
-# such judgement to make from here: the operator's spare stick and the operator's
-# only backup drive look identical to lsblk. Naming what is about to be erased
-# and asking is the whole of the defence, and it is the operator's to make.
+# One objective predicate for the advanced path. Tests replace this boundary;
+# ordinary selection trusts diskutil/lsblk's own verdict instead.
+kantainer_device_node_exists() {
+    [[ -b "$1" || -c "$1" ]]
+}
+
+kantainer_plist_value() {
+    local plist="$1" key="$2"
+    printf '%s' "${plist}" | plutil -extract "${key}" raw -o - -- - 2> /dev/null
+}
+
+kantainer_linux_device_facts() {
+    local device="$1" facts type model size parent whole
+    facts="$(
+        lsblk --json --nodeps --output TYPE,MODEL,SIZE,PKNAME "${device}" 2> /dev/null |
+            jq -r '.blockdevices[0]
+                   | [ .type, (.model // "unknown"), (.size // "unknown"), (.pkname // "unknown") ]
+                   | @tsv'
+    )" || return 1
+    [[ -n "${facts}" ]] || return 1
+    IFS=$'\t' read -r type model size parent <<< "${facts}"
+    if [[ "${type}" == "part" && "${parent}" != "unknown" ]]; then
+        whole="/dev/${parent}"
+    elif [[ "${type}" == "disk" ]]; then
+        whole="${device}"
+    else
+        whole="unknown"
+    fi
+    printf 'Linux\t%s\t%s\t%s\t%s\tunknown\tunknown\t%s\n' \
+        "${type:-unknown}" "${model:-unknown}" "${size:-unknown}" \
+        "${whole}" "${device}"
+}
+
+kantainer_darwin_device_facts() {
+    local device="$1" plist node parent is_whole internal physical model size kind whole
+    plist="$(diskutil info -plist "${device}" 2> /dev/null)" || return 1
+    [[ -n "${plist}" ]] || return 1
+
+    node="$(kantainer_plist_value "${plist}" DeviceNode || true)"
+    parent="$(kantainer_plist_value "${plist}" ParentWholeDisk || true)"
+    is_whole="$(kantainer_plist_value "${plist}" Whole || true)"
+    internal="$(kantainer_plist_value "${plist}" Internal || true)"
+    physical="$(kantainer_plist_value "${plist}" VirtualOrPhysical || true)"
+    model="$(kantainer_plist_value "${plist}" MediaName || true)"
+    size="$(kantainer_plist_value "${plist}" DiskSize || true)"
+
+    case "${is_whole}" in
+        true) kind="disk" ;;
+        false) kind="part" ;;
+        *) kind="unknown" ;;
+    esac
+    if [[ -n "${parent}" ]]; then
+        whole="/dev/${parent#/dev/}"
+    elif [[ "${is_whole}" == "true" ]]; then
+        whole="${node}"
+    else
+        whole="unknown"
+    fi
+    printf 'Darwin\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${kind}" "${model:-unknown}" "${size:-unknown}" \
+        "${whole:-unknown}" "${internal:-unknown}" \
+        "${physical:-unknown}" "${node:-unknown}"
+}
+
+# Normalize the two operating systems' device accounts into eight non-empty
+# fields: host, kind, model, size, containing whole disk, internal state,
+# physical state, and canonical node. Tests replace this hardware boundary.
+kantainer_device_facts() {
+    local device="$1" host
+    host="$(kantainer_host)"
+    case "${host}" in
+        Linux) kantainer_linux_device_facts "${device}" ;;
+        Darwin) kantainer_darwin_device_facts "${device}" ;;
+        *) return 2 ;;
+    esac
+}
+
+# Print the normalized identity after applying the host's target policy.
 kantainer_check_device() {
-    local device="$1" facts type model size pkname
+    local device="$1" mode="${2:-ordinary}" host facts
+    local fact_host type model size whole internal physical canonical
 
-    facts="$(kantainer_device_facts "${device}")" ||
-        kantainer_fail "${device} is not a block device on this machine.
-    List what is attached with:
-        lsblk --nodeps --output NAME,MODEL,SIZE"
+    host="$(kantainer_host)"
+    case "${host}" in
+        Linux | Darwin) ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
 
-    IFS=$'\t' read -r type model size pkname <<< "${facts}"
+    if [[ "${mode}" == "advanced" ]]; then
+        [[ "${host}" == "Darwin" ]] ||
+            kantainer_fail "the advanced device override is only available on macOS."
+        if [[ ! "${device}" =~ ^/dev/[^/]+$ ]] ||
+            ! kantainer_device_node_exists "${device}"; then
+            kantainer_fail "${device} is not an existing block or character device node."
+        fi
 
-    if [[ "${type}" == "part" ]]; then
-        kantainer_fail "${device} is a partition, not a whole drive.
-    An installer written to a partition has no boot sector and cannot start.
-    You probably mean /dev/${pkname}."
+        # diskutil does not describe every character device. The advanced path
+        # deliberately admits those nodes, with unknown display facts.
+        facts="$(kantainer_device_facts "${device}" 2> /dev/null || true)"
+        if [[ -z "${facts}" ]]; then
+            facts="Darwin"$'\t'"device"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"${device}"
+        fi
+        printf '%s\n' "${facts}"
+        return 0
     fi
 
-    # Everything that is not a whole disk fails for the same reason the partition
-    # above does - loop, device-mapper, RAID and optical devices are not something
-    # a machine boots an installer from - so the rule is stated positively rather
-    # than as a list of things to exclude. A USB stick is always type "disk".
-    #
-    # This is NOT a judgement about whether the device is safe to erase. There is
-    # no such judgement to make from here, and the comment above says why. It is
-    # the same objective check as the partition one: lsblk's own verdict about
-    # what kind of device this is.
-    if [[ "${type}" != "disk" ]]; then
-        kantainer_fail "${device} is a ${type:-unrecognised} device, not a whole drive.
+    if ! facts="$(kantainer_device_facts "${device}")"; then
+        if [[ "${host}" == "Linux" ]]; then
+            kantainer_fail "${device} is not a block device on this machine.
+    List what is attached with:
+        lsblk --nodeps --output NAME,MODEL,SIZE"
+        fi
+        kantainer_fail "${device} is not a macOS disk device.
+    List external physical disks with:
+        diskutil list external physical"
+    fi
+
+    IFS=$'\t' read -r fact_host type model size whole internal physical canonical <<< "${facts}"
+    [[ "${fact_host}" == "${host}" ]] ||
+        kantainer_fail "cannot safely classify ${device} from ${host} device facts."
+
+    if [[ "${host}" == "Linux" ]]; then
+        if [[ "${type}" == "part" ]]; then
+            kantainer_fail "${device} is a partition, not a whole drive.
+    An installer written to a partition has no boot sector and cannot start.
+    You probably mean ${whole}."
+        fi
+        if [[ "${type}" != "disk" ]]; then
+            kantainer_fail "${device} is a ${type:-unrecognised} device, not a whole drive.
     An installer has to be written to a physical drive to be bootable.
     List what is attached with:
         lsblk --nodeps --output NAME,TYPE,MODEL,SIZE"
+        fi
+        printf '%s\n' "${facts}"
+        return 0
     fi
 
-    printf '%s\t%s\n' "${model}" "${size}"
+    if [[ "${type}" == "part" ]]; then
+        kantainer_fail "${device} is a partition, not a whole disk.
+    Use ${whole} for the whole disk, or choose the advanced device override."
+    fi
+    if [[ "${type}" == "unknown" || "${model}" == "unknown" ||
+          "${size}" == "unknown" || "${whole}" == "unknown" ||
+          "${internal}" == "unknown" || "${physical}" == "unknown" ||
+          "${canonical}" == "unknown" ]]; then
+        kantainer_fail "cannot safely classify ${device} from macOS device facts."
+    fi
+    [[ "${canonical}" == "${device}" && "${whole}" == "${device}" &&
+       "${device}" =~ ^/dev/disk[0-9]+$ ]] ||
+        kantainer_fail "${device} is not the full /dev/diskN path of a whole macOS disk."
+    [[ "${internal}" == "false" ]] ||
+        kantainer_fail "${device} is an internal disk. The ordinary path accepts only external disks."
+    [[ "${physical}" == "Physical" ]] ||
+        kantainer_fail "${device} is a virtual disk. The ordinary path accepts only physical disks."
+
+    printf '%s\n' "${facts}"
 }
 
 # The last gate before the irreversible part. The device path has to be typed
@@ -97,22 +208,36 @@ kantainer_check_device() {
 # while dd wrote to the drive that inherited the name. Same objective verdict,
 # read at the moment it is used.
 kantainer_confirm_erase() {
-    local device="$1" facts model size answer
+    local device="$1" mode="${2:-ordinary}" facts
+    local host type model size whole internal physical canonical risk answer
 
     # Tested, not assumed: kantainer_fail exits, but inside a command
     # substitution that only kills the subshell. Without this the caller sails
     # on and asks the operator to confirm erasing a device that is not there,
     # with an empty model and size where the answer should be.
-    if ! facts="$(kantainer_check_device "${device}")"; then
+    if ! facts="$(kantainer_check_device "${device}" "${mode}")"; then
         exit 1
     fi
-    IFS=$'\t' read -r model size <<< "${facts}"
+    IFS=$'\t' read -r host type model size whole internal physical canonical <<< "${facts}"
+
+    case "${host}:${mode}" in
+        Darwin:advanced)
+            risk="ADVANCED OVERRIDE — macOS safety classification bypassed"
+            ;;
+        Darwin:ordinary)
+            risk="external whole physical disk"
+            ;;
+        *)
+            risk="whole disk selected by the operator"
+            ;;
+    esac
 
     {
         echo
         echo "ABOUT TO ERASE ${device}"
         echo "    model: ${model}"
         echo "    size:  ${size}"
+        echo "    risk:  ${risk}"
         echo
         echo "Everything on that device will be gone, and this cannot be undone."
         echo "Type ${device} to go ahead, or anything else to stop."
@@ -135,12 +260,23 @@ kantainer_as_root() {
 }
 
 main() {
-    local device="${1-}" config="${2:-kantainer.conf}"
-    local iso staging
+    local target="${1-}" config="${2:-kantainer.conf}"
+    local device mode="ordinary" iso staging
+
+    case "${target}" in
+        --advanced-device=*)
+            mode="advanced"
+            device="${target#--advanced-device=}"
+            ;;
+        *)
+            device="${target}"
+            ;;
+    esac
 
     [[ -n "${device}" ]] ||
         kantainer_fail "no device given.
     Usage: just flash <device> [config-file]
+    Advanced: just flash --advanced-device=<device> [config-file]
     List what is attached with:
         lsblk --nodeps --output NAME,MODEL,SIZE"
 
@@ -149,7 +285,7 @@ main() {
 
     # Fail fast on a path that could never work, before spending a download on
     # it. What the operator is shown and confirms is read again below.
-    kantainer_check_device "${device}" > /dev/null
+    kantainer_check_device "${device}" "${mode}" > /dev/null
 
     command -v podman > /dev/null ||
         kantainer_fail "podman is not on PATH.
@@ -184,7 +320,7 @@ main() {
         --output "/out/installer.iso" \
         "/iso/$(basename "${iso}")"
 
-    kantainer_confirm_erase "${device}"
+    kantainer_confirm_erase "${device}" "${mode}"
 
     echo "flash: writing to ${device}" >&2
     kantainer_as_root dd \
