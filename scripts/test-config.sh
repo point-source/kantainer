@@ -289,6 +289,11 @@ fi
 assert_jq "the machine carries a container signing policy at all" \
     '[.storage.files[] | select(.path == "/etc/containers/policy.json")] | length' "1"
 
+# Fedora CoreOS already carries this file. Ignition must replace it before the
+# machine can perform its first signed attachment.
+assert_jq "the signing policy replaces the one Fedora CoreOS ships" \
+    '.storage.files[] | select(.path == "/etc/containers/policy.json") | .overwrite' "true"
+
 policy="$(file_at /etc/containers/policy.json)"
 
 if jq -e --arg ref "${IMAGE_REF}" --arg key /etc/pki/containers/kantainer.pub '

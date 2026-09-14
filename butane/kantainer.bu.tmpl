@@ -128,7 +128,10 @@ storage:
       contents:
         local: kantainer.pub
 
+    # Stock Fedora CoreOS already owns this path. Without overwrite, Ignition
+    # stops during first boot before the signed attachment above can run.
     - path: /etc/containers/policy.json
+      overwrite: true
       mode: 0644
       user:
         id: 0
