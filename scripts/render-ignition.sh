@@ -142,7 +142,11 @@ if [[ -n "${KANTAINER_WIFI_SSID}" ]]; then
     # quietly, which associates with the wrong secret. Both are escaped here;
     # every other character, & | % and quotes included, goes in as it is.
     keyfile_escape() {
-        local value="${1//\\/\\\\}"
+        # Use the same one-pass literal scanner as the Butane template. Pattern
+        # substitution gives backslashes in replacement text different meaning
+        # across supported Bash versions.
+        local value
+        value="$(fill "$1" "\\" "\\\\")"
         case "${value}" in
             " "*) value="\\s${value#" "}" ;;
             "	"*) value="\\t${value#"	"}" ;;

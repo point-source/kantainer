@@ -476,8 +476,8 @@ reads_back "NetworkManager reads back the passphrase" wifi-security psk "${TEST_
 AWKWARD_KEY_COMMENT=$'single\'quote double"quote & back\\slash tab\t space $ ` @@ATTACH_IMAGE@@'
 ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C "${AWKWARD_KEY_COMMENT}" < /dev/null
 AWKWARD_KEY="$(cat "${WORK}/awkward.pub")"
-AWKWARD_PSK="${TEST_PASSPHRASE}"'&\|%'
-AWKWARD_SSID='net&work\one'
+AWKWARD_PSK=$'valid-pass \'" & back\\slash tab\t space $ ` | % @@SSID@@'
+AWKWARD_SSID=$'net \'" & back\\slash tab\t space $ ` | % @@PSK@@'
 
 render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
     "KANTAINER_WIFI_SSID=${AWKWARD_SSID}" "KANTAINER_WIFI_PASSPHRASE=${AWKWARD_PSK}"
@@ -485,9 +485,9 @@ render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
 assert_jq "an SSH key comment keeps literal characters and placeholder text" \
     '.passwd.users[0].sshAuthorizedKeys[0]' "${AWKWARD_KEY}"
 
-reads_back "an SSID containing & and \\ reaches NetworkManager intact" \
+reads_back "an SSID keeps literal characters and placeholder text" \
     wifi ssid "${AWKWARD_SSID}"
-reads_back "a passphrase containing & \\ | % reaches NetworkManager intact" \
+reads_back "a passphrase keeps literal characters and placeholder text" \
     wifi-security psk "${AWKWARD_PSK}"
 
 # A leading space is the other half of GLib's escaping rule: written raw it is
@@ -495,6 +495,11 @@ reads_back "a passphrase containing & \\ | % reaches NetworkManager intact" \
 render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE= ${TEST_PASSPHRASE} "
 reads_back "a passphrase with a leading space keeps it" \
     wifi-security psk " ${TEST_PASSPHRASE} "
+
+LEADING_TAB_PSK=$'\t'"${TEST_PASSPHRASE} "
+render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=${LEADING_TAB_PSK}"
+reads_back "a passphrase with a leading tab keeps it" \
+    wifi-security psk "${LEADING_TAB_PSK}"
 
 AWKWARD_PASSWORD="${TEST_PASSWORD}"'&\|%'
 render "KANTAINER_PORTAINER_PASSWORD=${AWKWARD_PASSWORD}"
