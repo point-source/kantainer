@@ -264,21 +264,74 @@ kantainer_as_root() {
 }
 
 # The only function allowed to cross from confirmation into target mutation.
-# Workstream-specific tests replace it to prove every refusal stays above this
-# boundary; the host-specific implementation follows in the next workstream.
 kantainer_mutate_target() {
-    local image="$1" device="$2"
+    local image="$1" device="$2" facts="$4"
+    local host _type _model _size whole _internal _physical _canonical
+    local bytes buffered write_device suffix disk_number
+
+    IFS=$'\t' read -r host _type _model _size whole _internal _physical _canonical <<< "${facts}"
+
+    write_device="${device}"
+    if [[ "${host}" == "Darwin" ]]; then
+        if ! bytes="$(LC_ALL=C wc -c < "${image}" | tr -d '[:space:]')"; then
+            kantainer_fail "cannot read the personalized installer at ${image}.
+    Nothing was written to ${device}."
+        fi
+
+        # disk and rdisk are the buffered and unbuffered views of the same
+        # macOS device. Always unmount the buffered containing whole disk.
+        buffered="${device}"
+        case "${buffered}" in
+            /dev/rdisk*) buffered="/dev/disk${buffered#/dev/rdisk}" ;;
+        esac
+        if [[ "${whole}" == "unknown" && "${buffered}" == /dev/disk[0-9]* ]]; then
+            suffix="${buffered#/dev/disk}"
+            disk_number="${suffix%%[!0-9]*}"
+            [[ -n "${disk_number}" ]] && whole="/dev/disk${disk_number}"
+        fi
+
+        if [[ "${whole}" =~ ^/dev/disk[0-9]+$ ]]; then
+            if ! diskutil unmountDisk "${whole}"; then
+                kantainer_fail "could not unmount ${whole}.
+    Nothing was written to ${device}."
+            fi
+        fi
+
+        if [[ "${buffered}" == /dev/disk[0-9]* ]]; then
+            if (( bytes % 4096 == 0 )); then
+                write_device="/dev/r${buffered#/dev/}"
+            else
+                write_device="${buffered}"
+            fi
+        fi
+    fi
 
     echo "flash: writing to ${device}" >&2
-    kantainer_as_root dd \
-        if="${image}" \
-        of="${device}" \
-        bs=4M status=progress conv=fsync
-    kantainer_as_root sync
+    if [[ "${host}" == "Darwin" ]]; then
+        if ! kantainer_as_root dd if="${image}" of="${write_device}" bs=4194304; then
+            kantainer_fail "writing ${device} failed after it began.
+    The target may be incomplete. Do not boot from it."
+        fi
+    else
+        if ! kantainer_as_root dd \
+            if="${image}" \
+            of="${write_device}" \
+            bs=4M status=progress conv=fsync; then
+            kantainer_fail "writing ${device} failed after it began.
+    The target may be incomplete. Do not boot from it."
+        fi
+    fi
+    if ! kantainer_as_root sync; then
+        kantainer_fail "sync failed after writing ${device}.
+    The target may be incomplete. Do not boot from it."
+    fi
 
     {
         echo
         echo "flash: ${device} is ready."
+        if [[ "${host}" == "Darwin" ]]; then
+            echo "Eject ${device} manually before removing it."
+        fi
         echo "Boot the target machine from it with a wired network connection."
         echo "It installs itself, reboots twice, and answers on https://<its-address>:9443."
     } >&2
@@ -287,7 +340,7 @@ kantainer_mutate_target() {
 kantainer_flash_device() {
     local image="$1" device="$2" mode="$3" initial_facts="$4"
     kantainer_confirm_erase "${device}" "${mode}" "${initial_facts}"
-    kantainer_mutate_target "${image}" "${device}" "${mode}"
+    kantainer_mutate_target "${image}" "${device}" "${mode}" "${initial_facts}"
 }
 
 main() {
