@@ -57,8 +57,11 @@ kantainer_load_config() {
         printf -v "${field}" '%s' ''
     done
 
-    local -A seen=()
-    local lineno=0 line key value known
+    # Bash 3.2 has indexed arrays but not associative arrays. Keep presence
+    # separate from the loaded value: KEY= is still a first occurrence and a
+    # later value for that key must be refused.
+    local -a seen=()
+    local lineno=0 line key value known seen_field duplicate
     while IFS= read -r line || [[ -n "${line}" ]]; do
         lineno=$(( lineno + 1 ))
 
@@ -93,11 +96,18 @@ kantainer_load_config() {
     kantainer.conf.example lists every field this file may set."
         fi
 
-        if [[ -n "${seen[${key}]:-}" ]]; then
+        duplicate=""
+        for seen_field in "${seen[@]}"; do
+            if [[ "${key}" == "${seen_field}" ]]; then
+                duplicate=1
+                break
+            fi
+        done
+        if [[ -n "${duplicate}" ]]; then
             kantainer_fail "${path} line ${lineno} sets ${key} a second time
     Two values for one field, and no way to tell which you meant. Delete one."
         fi
-        seen["${key}"]=1
+        seen[${#seen[@]}]="${key}"
 
         printf -v "${key}" '%s' "${value}"
     done < "${path}"

@@ -168,6 +168,28 @@ refuses "refuses a misspelt field rather than ignoring it" "KANTAINER_USERNMAE" 
 refuses "refuses a key that merely looks like two fields" "unknown field: KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY" \
     "KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY=x"
 
+# Duplicate tracking is separate from the value itself. In particular, a blank
+# optional field still counts as its first occurrence; accepting the later value
+# would silently turn a malformed configuration into a different machine.
+duplicate_refuses() {
+    local name="$1" key_name="$2" first="$3" second="$4"
+    config "${WORK}/conf" "${key_name}=${first}"
+    printf '%s=%s\n' "${key_name}" "${second}" >> "${WORK}/conf"
+
+    local out status=0
+    out="$("${CHECK}" "${WORK}/conf" 2>&1)" || status=$?
+    if [[ "${status}" -eq 0 ]]; then
+        not_ok "${name} (accepted it)"
+    elif [[ "${out}" != *"sets ${key_name} a second time"* ]]; then
+        not_ok "${name} (wrong refusal: ${out})"
+    else
+        ok "${name}"
+    fi
+}
+
+duplicate_refuses "refuses a duplicate field" KANTAINER_USERNAME operator another-operator
+duplicate_refuses "refuses a duplicate whose first value is empty" KANTAINER_TARGET_DRIVE "" /dev/nvme0n1
+
 run_missing() {
     local out status=0
     out="$("${CHECK}" "${WORK}/absent" 2>&1)" || status=$?
