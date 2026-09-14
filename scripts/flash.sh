@@ -22,6 +22,7 @@
 set -oue pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+KANTAINER_FLASH_STAGING=""
 
 # The same rules `just config-check` and `just render` apply, from the same
 # library: a configuration one of them accepts is one this can build from.
@@ -184,8 +185,9 @@ kantainer_check_device() {
           "${canonical}" == "unknown" ]]; then
         kantainer_fail "cannot safely classify ${device} from macOS device facts."
     fi
-    [[ "${canonical}" == "${device}" && "${whole}" == "${device}" &&
-       "${device}" =~ ^/dev/disk[0-9]+$ ]] ||
+    [[ "${canonical}" == "${device}" ]] ||
+        kantainer_fail "macOS reports ${device} as ${canonical}, so the supplied path is not its device node."
+    [[ "${whole}" == "${device}" && "${device}" =~ ^/dev/disk[0-9]+$ ]] ||
         kantainer_fail "${device} is not the full /dev/diskN path of a whole macOS disk."
     [[ "${internal}" == "false" ]] ||
         kantainer_fail "${device} is an internal disk. The ordinary path accepts only external disks."
@@ -385,8 +387,9 @@ main() {
     # /var/tmp rather than /tmp: this holds a copy of a 1.3 GB ISO, and /tmp is
     # commonly a tmpfs sized for something smaller. mktemp gives 0700, and the
     # trap is armed before the operator's key and password are written into it.
-    staging="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kantainer-flash.XXXXXXXX)"
-    trap 'rm -rf "${staging}"' EXIT
+    staging="$(mktemp -d "${TMPDIR:-/var/tmp}/kantainer-flash.XXXXXXXX")"
+    KANTAINER_FLASH_STAGING="${staging}"
+    trap 'rm -rf "${KANTAINER_FLASH_STAGING}"' EXIT
 
     "${REPO_ROOT}/scripts/render-installer.sh" "${config}" > "${staging}/installer.ign"
 
