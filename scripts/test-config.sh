@@ -473,7 +473,8 @@ reads_back "NetworkManager reads back the passphrase" wifi-security psk "${TEST_
 # \ starts an escape - and a value mangled there is not a syntax error: it is a
 # key the machine will not accept, or a passphrase it cannot associate with,
 # discovered in person.
-ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C 'a&b\c|d%e' < /dev/null
+AWKWARD_KEY_COMMENT=$'single\'quote double"quote & back\\slash tab\t space $ ` @@ATTACH_IMAGE@@'
+ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C "${AWKWARD_KEY_COMMENT}" < /dev/null
 AWKWARD_KEY="$(cat "${WORK}/awkward.pub")"
 AWKWARD_PSK="${TEST_PASSPHRASE}"'&\|%'
 AWKWARD_SSID='net&work\one'
@@ -481,7 +482,7 @@ AWKWARD_SSID='net&work\one'
 render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
     "KANTAINER_WIFI_SSID=${AWKWARD_SSID}" "KANTAINER_WIFI_PASSPHRASE=${AWKWARD_PSK}"
 
-assert_jq "an SSH key comment containing & \\ | % survives intact" \
+assert_jq "an SSH key comment keeps literal characters and placeholder text" \
     '.passwd.users[0].sshAuthorizedKeys[0]' "${AWKWARD_KEY}"
 
 reads_back "an SSID containing & and \\ reaches NetworkManager intact" \
