@@ -239,6 +239,13 @@ if kantainer_check_device /dev/disk0 advanced > /dev/null 2>&1; then
 else
     not_ok "advanced mode admits an internal macOS device node"
 fi
+advanced_prompt="$( ( kantainer_confirm_erase /dev/disk0 advanced ) < /dev/null 2>&1 || true )"
+if [[ "${advanced_prompt}" == *"ADVANCED OVERRIDE"* &&
+      "${advanced_prompt}" == *"classification bypassed"* ]]; then
+    ok "advanced confirmation displays the stronger risk"
+else
+    not_ok "advanced confirmation displays the stronger risk"
+fi
 
 FIXTURE_IS_NODE=""
 if err="$( ( kantainer_check_device /tmp/not-a-device advanced ) 2>&1 >/dev/null )"; then
@@ -300,19 +307,20 @@ else
     ok "refuses when nobody answers"
 fi
 
-### the confirmation describes the device NOW, not when the command started
+### the confirmation refuses a device whose identity changed
 
 # Minutes pass between the first look at the device and this prompt: a 1.3 GB
 # download and a container that rebuilds the ISO. A stick pulled out in that
 # window - or a flaky port - frees its name for whatever is plugged in next, and
 # the kernel hands it straight back. Showing what lsblk said at the start would
 # describe a device that is no longer there, and the operator would confirm it.
+initial_facts=$'Linux\tdisk\tKingston DataTraveler\t28.9G\t/dev/sdb\tunknown\tunknown\t/dev/sdb'
 linux_facts disk "WD My Book BACKUP" 4.0T /dev/sdb /dev/sdb
-prompt="$( ( kantainer_confirm_erase /dev/sdb ) < /dev/null 2>&1 || true )"
-if [[ "${prompt}" == *"WD My Book BACKUP"* && "${prompt}" != *"Kingston"* ]]; then
-    ok "the confirmation describes the device as it is when it asks"
+prompt="$( ( kantainer_confirm_erase /dev/sdb ordinary "${initial_facts}" ) < /dev/null 2>&1 || true )"
+if [[ "${prompt}" == *"changed"* && "${prompt}" != *"ABOUT TO ERASE"* ]]; then
+    ok "refuses a device whose identity changed before confirmation"
 else
-    not_ok "the confirmation describes the device as it is when it asks"
+    not_ok "refuses a device whose identity changed before confirmation"
 fi
 
 # The stick was pulled out and nothing took its name. There is nothing to
@@ -327,6 +335,72 @@ if [[ "${err}" != *"ABOUT TO ERASE"* ]]; then
     ok "does not prompt at all when the device is gone"
 else
     not_ok "does not prompt at all when the device is gone"
+fi
+
+### every unsuccessful final gate stays before the mutation boundary
+
+MUTATION_LOG="${WORK}/mutation.log"
+
+# Invoked indirectly through the production orchestration function.
+# shellcheck disable=SC2329
+kantainer_mutate_target() {
+    printf 'mutate %s %s %s\n' "$1" "$2" "$3" >> "${MUTATION_LOG}"
+}
+
+initial_facts=$'Linux\tdisk\tKingston DataTraveler\t28.9G\t/dev/sdb\tunknown\tunknown\t/dev/sdb'
+
+assert_no_mutation() {
+    local name="$1" input="$2"
+    linux_facts disk "Kingston DataTraveler" 28.9G /dev/sdb /dev/sdb
+    : > "${MUTATION_LOG}"
+    if printf '%s' "${input}" | ( kantainer_flash_device fixture.iso /dev/sdb ordinary "${initial_facts}" ) \
+            > /dev/null 2>&1; then
+        not_ok "${name} is refused"
+    elif [[ ! -s "${MUTATION_LOG}" ]]; then
+        ok "${name} stays before target mutation"
+    else
+        not_ok "${name} reached target mutation"
+    fi
+}
+
+assert_no_mutation "a declined confirmation" $'no\n'
+assert_no_mutation "a different device answer" $'/dev/sda\n'
+assert_no_mutation "end of input" ""
+
+linux_facts disk "Kingston DataTraveler" 28.9G /dev/sdb /dev/sdb
+initial_facts="$(kantainer_check_device /dev/sdb)"
+linux_facts "" "" "" "" ""
+: > "${MUTATION_LOG}"
+if ( kantainer_flash_device fixture.iso /dev/sdb ordinary "${initial_facts}" ) \
+        < /dev/null > /dev/null 2>&1; then
+    not_ok "a final classification refusal is refused"
+elif [[ ! -s "${MUTATION_LOG}" ]]; then
+    ok "a final classification refusal stays before target mutation"
+else
+    not_ok "a final classification refusal reached target mutation"
+fi
+
+linux_facts disk "Kingston DataTraveler" 28.9G /dev/sdb /dev/sdb
+initial_facts="$(kantainer_check_device /dev/sdb)"
+linux_facts disk "WD My Book BACKUP" 4.0T /dev/sdb /dev/sdb
+: > "${MUTATION_LOG}"
+if printf '/dev/sdb\n' | ( kantainer_flash_device fixture.iso /dev/sdb ordinary "${initial_facts}" ) \
+        > /dev/null 2>&1; then
+    not_ok "a changed device is refused"
+elif [[ ! -s "${MUTATION_LOG}" ]]; then
+    ok "a changed device stays before target mutation"
+else
+    not_ok "a changed device reached target mutation"
+fi
+
+linux_facts disk "Kingston DataTraveler" 28.9G /dev/sdb /dev/sdb
+initial_facts="$(kantainer_check_device /dev/sdb)"
+: > "${MUTATION_LOG}"
+if printf '/dev/sdb\n' | ( kantainer_flash_device fixture.iso /dev/sdb ordinary "${initial_facts}" ) \
+        > /dev/null 2>&1 && grep -qF 'mutate fixture.iso /dev/sdb ordinary' "${MUTATION_LOG}"; then
+    ok "exact confirmation crosses the mutation boundary"
+else
+    not_ok "exact confirmation crosses the mutation boundary"
 fi
 
 ### the command as the operator runs it

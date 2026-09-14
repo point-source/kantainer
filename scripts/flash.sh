@@ -208,7 +208,7 @@ kantainer_check_device() {
 # while dd wrote to the drive that inherited the name. Same objective verdict,
 # read at the moment it is used.
 kantainer_confirm_erase() {
-    local device="$1" mode="${2:-ordinary}" facts
+    local device="$1" mode="${2:-ordinary}" expected="${3-}" facts
     local host type model size whole internal physical canonical risk answer
 
     # Tested, not assumed: kantainer_fail exits, but inside a command
@@ -217,6 +217,10 @@ kantainer_confirm_erase() {
     # with an empty model and size where the answer should be.
     if ! facts="$(kantainer_check_device "${device}" "${mode}")"; then
         exit 1
+    fi
+    if [[ -n "${expected}" && "${facts}" != "${expected}" ]]; then
+        kantainer_fail "${device} changed after it was first checked.
+    Nothing was unmounted or written. Run the command again for the device now attached."
     fi
     IFS=$'\t' read -r host type model size whole internal physical canonical <<< "${facts}"
 
@@ -259,9 +263,36 @@ kantainer_as_root() {
     fi
 }
 
+# The only function allowed to cross from confirmation into target mutation.
+# Workstream-specific tests replace it to prove every refusal stays above this
+# boundary; the host-specific implementation follows in the next workstream.
+kantainer_mutate_target() {
+    local image="$1" device="$2"
+
+    echo "flash: writing to ${device}" >&2
+    kantainer_as_root dd \
+        if="${image}" \
+        of="${device}" \
+        bs=4M status=progress conv=fsync
+    kantainer_as_root sync
+
+    {
+        echo
+        echo "flash: ${device} is ready."
+        echo "Boot the target machine from it with a wired network connection."
+        echo "It installs itself, reboots twice, and answers on https://<its-address>:9443."
+    } >&2
+}
+
+kantainer_flash_device() {
+    local image="$1" device="$2" mode="$3" initial_facts="$4"
+    kantainer_confirm_erase "${device}" "${mode}" "${initial_facts}"
+    kantainer_mutate_target "${image}" "${device}" "${mode}"
+}
+
 main() {
     local target="${1-}" config="${2:-kantainer.conf}"
-    local device mode="ordinary" iso staging
+    local device mode="ordinary" initial_facts iso staging
 
     case "${target}" in
         --advanced-device=*)
@@ -285,7 +316,9 @@ main() {
 
     # Fail fast on a path that could never work, before spending a download on
     # it. What the operator is shown and confirms is read again below.
-    kantainer_check_device "${device}" "${mode}" > /dev/null
+    if ! initial_facts="$(kantainer_check_device "${device}" "${mode}")"; then
+        exit 1
+    fi
 
     command -v podman > /dev/null ||
         kantainer_fail "podman is not on PATH.
@@ -320,21 +353,7 @@ main() {
         --output "/out/installer.iso" \
         "/iso/$(basename "${iso}")"
 
-    kantainer_confirm_erase "${device}" "${mode}"
-
-    echo "flash: writing to ${device}" >&2
-    kantainer_as_root dd \
-        if="${staging}/installer.iso" \
-        of="${device}" \
-        bs=4M status=progress conv=fsync
-    kantainer_as_root sync
-
-    {
-        echo
-        echo "flash: ${device} is ready."
-        echo "Boot the target machine from it with a wired network connection."
-        echo "It installs itself, reboots twice, and answers on https://<its-address>:9443."
-    } >&2
+    kantainer_flash_device "${staging}/installer.iso" "${device}" "${mode}" "${initial_facts}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
