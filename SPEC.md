@@ -120,6 +120,157 @@ wireless. See §spec:network-attachment.
 Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attributes,
 §req:priorities.
 
+## Operator-host support §spec:operator-host-support
+
+*Status: not started*
+
+The operator can run `just config-check`, `just render`, and `just flash` on the existing
+Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
+behind those commands works with the Bash 3.2 supplied by macOS; the operator does not
+install another shell. An unsupported operating system is refused with a message that names
+the unsupported platform before a target device is changed.
+
+Given the same repository state and configuration, Linux and macOS accept and refuse the
+same configuration values and render byte-identical machine specifications. Quotes,
+ampersands, backslashes, tabs, spaces, dollar signs, backticks, and text that resembles a
+template placeholder remain literal. Replacement text is never interpreted as syntax,
+matched again recursively, or changed by a later placeholder replacement. Configuration
+checking continues to reject duplicate fields exactly, including when the first occurrence
+has an empty value.
+
+The Fedora CoreOS installer is verified against the repository's pinned checksum on both
+hosts. A supported Mac uses checksum facilities supplied with the operating system, while
+preserving the existing behavior for valid downloads, corrupt downloads, and corrupt cached
+copies; macOS support requires no separate checksum package.
+
+On macOS, local installer personalisation works with Docker Desktop or Podman. Docker is
+chosen when both are usable, and Podman is chosen when Docker is absent. If Docker is
+present but its personalisation attempt fails while Podman is available, the failure is
+named and the operator chooses whether to retry with Podman. Declining, reaching end of
+input, or a failed Podman attempt ends the command without touching the target. Linux keeps
+its established Podman behavior.
+
+A pull request runs a focused macOS compatibility check through the real operator commands
+and the operating system's built-in Bash. It covers configuration, byte-identical rendering,
+checksum verification, runtime choice, and the flash flow with small controlled inputs. The
+broader Linux test suite may retain newer Bash features because it validates the image and
+installed-machine behavior as well as operator commands; the Bash 3.2 floor applies to the
+operator-facing paths and everything they invoke.
+
+**Decision and constraint.** The existing shared configuration, rendering, installer-fetch,
+and flash behavior remains one contract across hosts, with host differences confined to the
+capabilities the operating system supplies. This extends the current architecture because
+§req:success-criteria requires the same documented workflow on a stock supported Mac, and
+§req:quality-attributes requires the two hosts to produce the same installer from the same
+inputs. A compatibility claim that covered only the top-level scripts would still fail as
+soon as a command reached a newer shell feature or a Linux-only utility underneath them.
+
+**Alternatives rejected.** Requiring a newer Bash on macOS was rejected because it adds a
+replacement shell before the promised one-command workflow can begin. Executing the
+configuration as shell input was rejected because operator values include shell syntax and
+secrets. Shell pattern replacement and general-purpose text substitution were rejected for
+operator values because their replacement syntax changes across Bash versions and gives
+special meaning to characters the configuration contract declares literal. Requiring one
+container runtime on every host was rejected because supported Mac operators commonly have
+either Docker Desktop or Podman. Porting the complete Linux suite to Bash 3.2 was rejected
+because its installed-machine checks are outside the operator-host boundary and a focused
+Mac check exercises the compatibility promise directly.
+
+**Tradeoffs.** Supporting the operating system's built-in tools leaves a small amount of
+host-specific behavior to maintain and makes two CI environments part of the release gate.
+The focused macOS check does not prove a multi-gigabyte download, a physical write, or a
+boot. The Docker-to-Podman retry needs operator input, but it keeps one runtime's failure
+from silently changing the tool that handles the operator's personalised installer.
+
+**User-level verification.** On a supported Mac with no replacement shell or checksum
+package, the operator checks and renders a configuration containing every literal character
+and placeholder-shaped value named above, and obtains the same bytes as the Linux run. With
+small installer fixtures, a contributor observes the Docker-only, Podman-only, Docker-first,
+accepted-retry, declined-retry, corrupt-download, and corrupt-cache outcomes through the real
+commands; the pull request's macOS check repeats those paths under the built-in Bash.
+
+Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
+§req:quality-attributes (Operator-host portability, Compatibility checks), §req:constraints.
+
+## Flash target safety and write integrity §spec:flash-target-safety
+
+*Status: not started*
+
+On Linux, the flash command preserves its existing target rule: it accepts a whole disk,
+including an internal disk, after showing its current identity and receiving exact-path
+confirmation. On macOS, the ordinary path accepts only an external whole physical disk. It
+refuses an internal disk, a partition, a disk image or other virtual disk, a path that is not
+a device, a bare device name, a mount point, an unclassifiable device, and an unknown host
+platform. Every refusal names what was rejected and occurs before unmounting or writing.
+
+The operator can make a separate advanced choice to target any existing block or character
+device node, including an internal disk, partition, or virtual device that the ordinary
+macOS path refuses. This path announces that the safety classification has been bypassed and
+expands the possible loss to any data reachable through the chosen device. It still refuses
+regular files, mount points, bare names, nonexistent paths, and anything that is not a device
+node. The advanced choice does not weaken any confirmation, ordering, or write-integrity
+rule.
+
+The target is classified once before installer preparation and again immediately before
+confirmation, so a removed device or a path whose identity changed during a download is not
+described from stale information. The final prompt shows the current path, model, size, and
+risk classification, and proceeds only when the operator types the exact full path they
+supplied. A refusal, a different answer, or end of input does not unmount or write the
+target.
+
+After exact confirmation, macOS unmounts every volume on the target before opening it for a
+write. An unmount failure ends the command without writing any image bytes. When the
+personalised image length is divisible by 4 KiB, the command uses macOS's faster unbuffered
+device interface; for every other length it uses the buffered interface so the final partial
+device sector is written completely. The confirmed identity remains the operator's original
+device path regardless of the interface selected for the write.
+
+The command writes every image byte and makes the data durable before reporting the stick
+ready. A write or durability failure exits non-zero, never reports success, and warns that a
+write which had begun may have left the target incomplete. A successful macOS write tells
+the operator to eject the target manually before removing it; failure or success does not
+trigger an automatic eject.
+
+**Decision and constraint.** macOS uses positive classification for its ordinary path and
+a conspicuous override for broader device access. §req:priorities identifies erasing the
+wrong disk as the only unrecoverable failure in the workflow, while §req:success-criteria
+requires an intentional escape hatch for real device nodes. The exact-path prompt remains
+the last gate because no local device metadata can distinguish a disposable USB stick from
+an external backup drive. The adaptive write interface was chosen because
+§req:quality-attributes requires byte-complete writes for images of any length, while an
+aligned image can safely use the substantially faster macOS path.
+
+**Alternatives rejected.** Applying Linux's accept-any-whole-disk rule to ordinary macOS
+flashing was rejected because a stock Mac can identify internal, external, physical, and
+virtual devices and the safety priority calls for refusing known high-risk categories.
+Removing the advanced path was rejected because operators need controlled access to real
+devices outside that common case. Always using the unbuffered interface was rejected because
+a partial final sector can fail after the target has already been overwritten. Always using
+the buffered interface was rejected because it makes every large write slower when aligned
+images can take the fast path without weakening integrity. Automatic eject was rejected in
+favor of an unambiguous durable-write result followed by a documented operator action.
+
+**Tradeoffs.** The ordinary macOS rule cannot tell a USB installer from an external backup,
+so exact confirmation still carries a destructive choice. The advanced path deliberately
+permits the internal system disk and other dangerous device nodes, giving a local operator
+with write privileges the ability to erase them. Reclassification narrows device-name reuse
+but cannot prevent a physical swap after the operator confirms. Manual eject adds one step
+after success. Unaligned images take the slower path to preserve their final bytes.
+
+**User-level verification.** On macOS, the operator lists external physical disks, supplies
+a `/dev/diskN` whole-disk path, sees its current identity, types that exact path, and observes
+confirmation before unmount, a complete write, durability, and the manual-eject instruction.
+The same path refuses an internal disk, partition, virtual disk, mount point, regular file,
+bare name, nonexistent path, and incomplete device facts without an unmount or write. A
+disposable virtual device proves the advanced opt-in, unmount-failure, aligned unbuffered,
+unaligned buffered, partial-write, durability-failure, and successful main-flow outcomes.
+The existing Linux whole-disk checks remain green, and small macOS fixtures exercise the
+same ordering in CI without exposing a real disk.
+
+Cites §req:success-criteria (1, 15, 16, 17, 19), §req:user-stories,
+§req:quality-attributes (Flash safety, Write integrity, Compatibility checks),
+§req:constraints, §req:priorities.
+
 ## Machine configuration §spec:machine-configuration
 
 *Status: complete* — `kantainer.conf.example` carries the template and `just config-check`
@@ -608,14 +759,22 @@ Cites §req:success-criteria (11), §req:quality-attributes, §req:constraints.
 
 ## Operator documentation §spec:operator-documentation
 
-*Status: complete* — `docs/rebuild.md`, `docs/flash.md` and `docs/verify.md`, indexed from the
-README.
+*Status: in progress* — the Linux rebuild, flash, and verification procedures exist and are
+indexed from the README; the flash procedure does not yet cover the supported macOS path.
 
 Three procedures the operator can follow without reconstructing anything from memory: how to
 rebuild after changing something, how to write the installer to a USB stick, and how to confirm
 Portainer is up after first boot. The third also states what to check when Portainer does not
 answer, so that a machine which stopped part-way through installation is distinguishable from one
 that is merely still working.
+
+The flash procedure states the supported operator hosts and their prerequisites. For macOS it
+shows how to list external physical disks, requires the full `/dev/diskN` path, explains the
+ordinary refusal categories and the advanced opt-in, and presents confirmation, unmount, write,
+durability, and manual eject in the order the operator experiences them. It explains Docker's
+priority, the prompted Podman retry, and the difference between a failure before the write and a
+failure that may have left a partial target. The Linux procedure retains its existing whole-disk
+selection and Podman behavior.
 
 `scripts/test-docs.sh`, which `just ci` runs, fails when the documentation names a `just` recipe,
 a repository path, a `kantainer-*` unit, a configuration field or a relative link this repository
@@ -628,6 +787,10 @@ The verification procedure is expanded to cover the not-yet-working case because
 install has a legitimate multi-minute window during which correct behaviour and failure look
 identical from outside — see §spec:installer-media. A procedure that only describes success would
 leave the operator guessing during precisely the interval where guessing is likely.
+
+The macOS instructions live in the same flash procedure because §req:success-criteria item 13
+promises the same three commands on both supported hosts. A separate Mac guide would duplicate the
+configuration and first-boot contract and allow the destructive steps to drift between documents.
 
 The documentation is written after the system is built, per §req:priorities, so that it describes
 what exists. That ordering changed what shipped, in one way worth recording: the first-boot
@@ -644,7 +807,22 @@ procedure is supposed to help. Checking the documentation's prose, ports or upst
 was rejected: none is decidable from what this repository holds, and a check that wrongly passes
 is worse than no check.
 
+A separate macOS flash guide was rejected because the one-command workflow has one safety
+contract and should have one authoritative procedure. Presenting only the ordinary path was
+rejected because the advanced device override is intentionally available and too destructive to
+leave discoverable only from command output.
+
 **Tradeoffs.** Documentation written last is documentation that can be cut under pressure.
 §req:priorities accepts that ranking while stating the repository is worth little without it.
+Host-specific branches make the flash procedure longer, but keep the shared configuration and
+first-boot sequence in one place.
 
-Cites §req:success-criteria (12), §req:priorities.
+**User-level verification.** Starting from the README on either supported host, an operator can
+find the flash procedure, install only the named prerequisites, identify an eligible target, run
+the command, predict every prompt and target mutation, and follow the success or failure guidance
+without consulting source code. Documentation checks prove that every referenced command, path,
+configuration field, unit, and link still exists; a semantic review follows both host branches
+against §spec:operator-host-support and §spec:flash-target-safety.
+
+Cites §req:success-criteria (12, 13, 15, 16, 17, 18), §req:user-stories,
+§req:quality-attributes, §req:constraints, §req:priorities.
