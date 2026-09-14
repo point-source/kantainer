@@ -122,7 +122,9 @@ Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attrib
 
 ## Operator-host support §spec:operator-host-support
 
-*Status: not started*
+*Status: in progress* — configuration checking and machine-specification rendering now
+use the shared Bash 3.2-compatible parser and literal renderer, with deterministic fixtures
+for host-byte comparison. Checksum, runtime, flash, and macOS CI support remain.
 
 The operator can run `just config-check`, `just render`, and `just flash` on the existing
 Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
