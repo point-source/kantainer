@@ -60,8 +60,9 @@ kantainer_load_config() {
     # Bash 3.2 has indexed arrays but not associative arrays. Keep presence
     # separate from the loaded value: KEY= is still a first occurrence and a
     # later value for that key must be refused.
-    local -a seen=()
-    local lineno=0 line key value known seen_field duplicate
+    local -a seen
+    local seen_count=0
+    local lineno=0 line key value known seen_field duplicate seen_index
     while IFS= read -r line || [[ -n "${line}" ]]; do
         lineno=$(( lineno + 1 ))
 
@@ -97,7 +98,8 @@ kantainer_load_config() {
         fi
 
         duplicate=""
-        for seen_field in "${seen[@]}"; do
+        for ((seen_index = 0; seen_index < seen_count; seen_index++)); do
+            seen_field="${seen[${seen_index}]}"
             if [[ "${key}" == "${seen_field}" ]]; then
                 duplicate=1
                 break
@@ -107,7 +109,8 @@ kantainer_load_config() {
             kantainer_fail "${path} line ${lineno} sets ${key} a second time
     Two values for one field, and no way to tell which you meant. Delete one."
         fi
-        seen[${#seen[@]}]="${key}"
+        seen[seen_count]="${key}"
+        seen_count=$(( seen_count + 1 ))
 
         printf -v "${key}" '%s' "${value}"
     done < "${path}"
