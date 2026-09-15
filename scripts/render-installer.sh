@@ -12,9 +12,15 @@
 # result in the Fedora CoreOS live ISO.
 #
 # Prints the specification to stdout and touches nothing else. It carries the
-# operator's SSH key, their Portainer password and - readable, for the machine
-# to hash during installation - their console password, so every intermediate
-# file is staged in a private temporary directory that is removed on exit.
+# operator's SSH key and their Portainer password, so every intermediate file is
+# staged in a private temporary directory that is removed on exit.
+#
+# NO CONTAINER, so this stays runnable by hand. The console password's hash is
+# the one thing that needs one, and `just flash` makes it before calling this,
+# handing it down through KANTAINER_RENDER_CONSOLE_PASSWORD_HASH for
+# scripts/render-ignition.sh to substitute (SPEC.md §spec:console-password). Run
+# this directly and the machine configuration inside carries the locked
+# placeholder instead.
 #
 # Usage: render-installer.sh [config-file]
 
