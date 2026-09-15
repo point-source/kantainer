@@ -145,11 +145,16 @@ BUTANE="${STAGING}/kantainer.bu"
 # has none, and a $6$ string full of $ characters never goes through a
 # substitution that would reinterpret them.
 #
-# IT IS DELIBERATELY NOT ONE OF config-lib.sh's KANTAINER_FIELDS. `just render`
-# never sets it, the config parser refuses an unknown key, so the operator
-# cannot set it either - which is what keeps `just render` containerless,
-# deterministic and byte-identical between Linux and macOS. A $6$ hash has a
-# random salt, and scripts/test-operator-config-compat.sh compares those bytes.
+# IT IS DELIBERATELY NOT ONE OF config-lib.sh's KANTAINER_FIELDS, so no
+# configuration file can reach it - which is what keeps `just render`
+# containerless, deterministic and byte-identical between Linux and macOS. A $6$
+# hash has a random salt, and scripts/test-operator-config-compat.sh compares
+# those bytes.
+#
+# An environment variable is inherited, though, so the Justfile's `render` recipe
+# CLEARS it rather than trusting that nobody exported it. Keeping that promise is
+# the recipe's job, not this file's: here the rule is simply that a hash supplied
+# is a hash used.
 #
 # `*` when no hash was supplied: crypt's own "no password will ever match this
 # account", so a document that somehow reaches a machine unsubstituted leaves a

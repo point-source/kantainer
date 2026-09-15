@@ -86,6 +86,27 @@ if grep -Fq "${CONSOLE_PASSWORD}" "${RENDERED}"; then
 fi
 echo "ok       - just render leaves the locked placeholder for the flash path"
 
+# The seam `just flash` uses is an environment variable, and an environment
+# variable is inherited. The Justfile's render recipe clears it for exactly that
+# reason; without that line an exported value in the caller's shell would put a
+# salted hash into these compared bytes and break this comparison on whichever
+# host happened to have it set. Exported here deliberately, because the promise
+# is that the command's output does not depend on the shell it was run from.
+# The single quotes are the point: `$6$` is crypt's literal method marker, not an
+# expansion, and the value has to arrive verbatim to be worth asserting on.
+# shellcheck disable=SC2016
+if ! (cd "${REPO_ROOT}" && KANTAINER_RENDER_CONSOLE_PASSWORD_HASH='$6$exported$byTheCaller' \
+        just render "${VALID}") > "${WORK}/ambient.ign" 2> "${WORK}/ambient.err"; then
+    echo "NOT OK   - just render rejected the fixture with the seam exported" >&2
+    cat "${WORK}/ambient.err" >&2
+    exit 1
+fi
+if [[ "$(jq -r '.passwd.users[0].passwordHash' < "${WORK}/ambient.ign")" != "*" ]]; then
+    echo "NOT OK   - just render used a hash exported into its environment" >&2
+    exit 1
+fi
+echo "ok       - just render ignores a hash exported into its environment"
+
 cp "${VALID}" "${DUPLICATE}"
 printf '%s\n' 'KANTAINER_TARGET_DRIVE=/dev/nvme0n1' >> "${DUPLICATE}"
 
