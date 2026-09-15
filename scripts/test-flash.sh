@@ -52,11 +52,11 @@ plutil() {
     case "${key}" in
         DeviceNode) printf '%s\n' /dev/disk7 ;;
         ParentWholeDisk) printf '%s\n' disk7 ;;
-        Whole) printf '%s\n' true ;;
+        WholeDisk) printf '%s\n' true ;;
         Internal) printf '%s\n' false ;;
         VirtualOrPhysical) printf '%s\n' Physical ;;
         MediaName) printf '%s\n' 'External USB' ;;
-        DiskSize) printf '%s\n' 32000000000 ;;
+        TotalSize) printf '%s\n' 32000000000 ;;
         *) return 1 ;;
     esac
 }
@@ -70,6 +70,8 @@ fi
 
 if grep -qF 'diskutil info -plist /dev/disk7' "${PROVIDER_LOG}" &&
     grep -qF 'plutil DeviceNode' "${PROVIDER_LOG}" &&
+    grep -qF 'plutil WholeDisk' "${PROVIDER_LOG}" &&
+    grep -qF 'plutil TotalSize' "${PROVIDER_LOG}" &&
     grep -qF 'plutil VirtualOrPhysical' "${PROVIDER_LOG}"; then
     ok "obtains macOS identity through diskutil and plutil"
 else

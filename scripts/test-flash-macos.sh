@@ -89,14 +89,14 @@ printf '%s\n' \
     '        parent="${device#/dev/}"; parent="${parent#r}"; parent="${parent%%s[0-9]*}"' \
     '        printf "%s\n" "${parent}"' \
     '        ;;' \
-    '    Whole) [[ "${class}" == "partition" ]] && printf "false\n" || printf "true\n" ;;' \
+    '    WholeDisk) [[ "${class}" == "partition" ]] && printf "false\n" || printf "true\n" ;;' \
     '    Internal) [[ "${class}" == "internal" ]] && printf "true\n" || printf "false\n" ;;' \
     '    VirtualOrPhysical) [[ "${class}" == "virtual" ]] && printf "Virtual\n" || printf "Physical\n" ;;' \
     '    MediaName)' \
     '        [[ "${class}" != "incomplete" ]] || exit 1' \
     '        [[ "${changed}" == 0 ]] && printf "Fixture USB\n" || printf "Replacement Disk\n"' \
     '        ;;' \
-    '    DiskSize) [[ "${class}" != "incomplete" ]] && printf "32000000000\n" || exit 1 ;;' \
+    '    TotalSize) [[ "${class}" != "incomplete" ]] && printf "32000000000\n" || exit 1 ;;' \
     '    *) exit 1 ;;' \
     'esac' \
     > "${BIN}/plutil"

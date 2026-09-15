@@ -76,11 +76,11 @@ kantainer_darwin_device_facts() {
 
     node="$(kantainer_plist_value "${plist}" DeviceNode || true)"
     parent="$(kantainer_plist_value "${plist}" ParentWholeDisk || true)"
-    is_whole="$(kantainer_plist_value "${plist}" Whole || true)"
+    is_whole="$(kantainer_plist_value "${plist}" WholeDisk || true)"
     internal="$(kantainer_plist_value "${plist}" Internal || true)"
     physical="$(kantainer_plist_value "${plist}" VirtualOrPhysical || true)"
     model="$(kantainer_plist_value "${plist}" MediaName || true)"
-    size="$(kantainer_plist_value "${plist}" DiskSize || true)"
+    size="$(kantainer_plist_value "${plist}" TotalSize || true)"
 
     case "${is_whole}" in
         true) kind="disk" ;;
