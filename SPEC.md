@@ -164,7 +164,7 @@ The focused macOS check does not prove a multi-gigabyte download, a physical wri
 boot. The Docker-to-Podman retry needs operator input, but it keeps one runtime's failure
 from silently changing the tool that handles the operator's personalised installer.
 
-Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
+Cites §req:success-criteria (13, 14, 18, 26), §req:user-stories,
 §req:quality-attributes (Operator-host portability, Compatibility checks), §req:constraints.
 
 ## Flash target safety and write integrity §spec:flash-target-safety
@@ -212,7 +212,7 @@ selection, all pre-mutation refusals, exact confirmation, unmount ordering, alig
 unaligned writes, complete bytes, durability failures, Linux compatibility, and the final
 manual-eject instruction. Native macOS verification adds the disposable RAM-disk branch.
 
-Cites §req:success-criteria (1, 15, 16, 17, 19), §req:user-stories,
+Cites §req:success-criteria (1, 15, 16, 17, 26), §req:user-stories,
 §req:quality-attributes (Flash safety, Write integrity, Compatibility checks),
 §req:constraints, §req:priorities.
 
@@ -240,7 +240,7 @@ refused: a machine without one is a supported choice, and the check says what th
 costs (§spec:console-password).
 
 **Decision and constraint.** The Portainer password is required rather than optional, which
-departs from §req:success-criteria item 4 and §req:priorities, where it ranks fifth as
+departs from §req:success-criteria item 4 and §req:priorities, where it ranks sixth as
 convenience with a fallback. The fallback no longer exists: current Portainer refuses to
 create its first administrator account without a token that it prints only to its own log,
 so an operator who skips the password cannot claim the account from a browser at all and
@@ -612,8 +612,11 @@ Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:prior
 ## Console password §spec:console-password
 
 *Status: complete* — not confirmed on real hardware: nothing in this repository can boot a
-machine, so the login itself and the boot-partition question below are both for the first
-hardware run.
+machine, so three things wait for the first hardware run — the login itself, the boot-partition
+question below, and whether the live installer environment carries a tool that can produce the
+stored form at all. Only the last can stop an install, and it stops it the right way: nothing is
+written and the screen says why, rather than a machine arriving quietly without the password the
+operator asked for.
 
 The configuration file carries an optional console password for the machine's login account.
 
