@@ -55,6 +55,12 @@ printf '%s\n' \
 
 printf '%s\n' \
     '#!/bin/bash' \
+    'printf "lsblk %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
+    'printf "%s\n" "{\"blockdevices\":[{\"type\":\"disk\",\"model\":\"Fixture Linux USB\",\"size\":\"32G\",\"pkname\":null}]}"' \
+    > "${BIN}/lsblk"
+
+printf '%s\n' \
+    '#!/bin/bash' \
     'printf "diskutil %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
     'if [[ "$1" == "unmountDisk" ]]; then' \
     '    [[ -z "${FIXTURE_FAIL_UNMOUNT-}" ]]' \
@@ -175,6 +181,12 @@ printf '%s\n' \
     'printf "shasum %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
     'exit 0' \
     > "${BIN}/shasum"
+
+printf '%s\n' \
+    '#!/bin/bash' \
+    'printf "sha256sum %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
+    'exit 0' \
+    > "${BIN}/sha256sum"
 
 printf '%s\n' \
     '#!/bin/bash' \
@@ -341,7 +353,16 @@ if run_fixture /dev/disk7 external $'podman\n/dev/disk7\n' \
     grep -q '^podman run ' "${EVENT_LOG}" &&
     ! grep -q '^podman stale-output$' "${EVENT_LOG}" &&
     grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
-    grep -q '^sync$' "${EVENT_LOG}"; then
+    grep -q '^sync$' "${EVENT_LOG}" &&
+    docker_run_line="$(grep -n '^docker run ' "${EVENT_LOG}" | cut -d: -f1)" &&
+    podman_run_line="$(grep -n '^podman run ' "${EVENT_LOG}" | cut -d: -f1)" &&
+    unmount_line="$(grep -n '^diskutil unmountDisk ' "${EVENT_LOG}" | cut -d: -f1)" &&
+    write_line="$(grep -n '^dd ' "${EVENT_LOG}" | cut -d: -f1)" &&
+    sync_line="$(grep -n '^sync$' "${EVENT_LOG}" | cut -d: -f1)" &&
+    (( docker_run_line < podman_run_line &&
+       podman_run_line < unmount_line &&
+       unmount_line < write_line &&
+       write_line < sync_line )); then
     ok "an accepted Docker failure retry uses Podman and reaches the safe write flow"
 else
     not_ok "an accepted Docker failure retry uses Podman and reaches the safe write flow"
@@ -414,6 +435,56 @@ elif grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retr
     ok "Docker failure without usable Podman stops before target mutation"
 else
     not_ok "Docker failure without usable Podman stops before target mutation"
+fi
+
+reset_fixture
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/sdb external $'/dev/sdb\n' Linux \
+        > "${WORK}/linux.out" 2> "${WORK}/linux.err" &&
+    grep -q '^podman info$' "${EVENT_LOG}" &&
+    grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! grep -q '^docker ' "${EVENT_LOG}" &&
+    ! grep -qF 'retry with Podman' "${WORK}/linux.err" &&
+    grep -q 'of=/dev/sdb' "${EVENT_LOG}" &&
+    grep -q '^sync$' "${EVENT_LOG}"; then
+    ok "Linux uses Podman and ignores Docker through the real flash path"
+else
+    not_ok "Linux uses Podman and ignores Docker through the real flash path"
+    cat "${WORK}/linux.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE=""
+if run_fixture /dev/sdb external $'/dev/sdb\n' Linux \
+        > "${WORK}/linux-no-podman.out" 2> "${WORK}/linux-no-podman.err"; then
+    not_ok "Linux refuses to replace unavailable Podman with Docker"
+elif grep -qF 'Podman is not usable' "${WORK}/linux-no-podman.err" &&
+    ! grep -q '^docker ' "${EVENT_LOG}" &&
+    ! grep -qF 'retry with Podman' "${WORK}/linux-no-podman.err" &&
+    ! target_was_mutated; then
+    ok "Linux requires Podman without offering Docker or a retry"
+else
+    not_ok "Linux requires Podman without offering Docker or a retry"
+fi
+
+reset_fixture
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_FAIL="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/sdb external $'/dev/sdb\n' Linux \
+        > "${WORK}/linux-podman-fail.out" 2> "${WORK}/linux-podman-fail.err"; then
+    not_ok "Linux Podman personalisation failure is terminal"
+elif grep -qF 'Podman could not personalise the installer' "${WORK}/linux-podman-fail.err" &&
+    grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! grep -q '^docker ' "${EVENT_LOG}" &&
+    ! grep -qF 'retry with Podman' "${WORK}/linux-podman-fail.err" &&
+    ! target_was_mutated; then
+    ok "Linux Podman failure stops before mutation without a retry prompt"
+else
+    not_ok "Linux Podman failure stops before mutation without a retry prompt"
 fi
 
 reset_fixture

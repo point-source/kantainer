@@ -123,8 +123,8 @@ Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attrib
 ## Operator-host support §spec:operator-host-support
 
 *Status: in progress* — configuration checking, machine-specification rendering, stock-tool
-checksum verification, and the Linux/macOS flash safety and write paths are implemented with
-deterministic fixtures. Runtime selection and macOS CI wiring remain.
+checksum verification, runtime selection and retry, and the Linux/macOS flash safety and write
+paths are implemented with deterministic fixtures. Pull-request macOS CI wiring remains.
 
 The operator can run `just config-check`, `just render`, and `just flash` on the existing
 Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
