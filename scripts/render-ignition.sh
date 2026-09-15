@@ -124,10 +124,27 @@ kantainer_registries_d_yaml "${IMAGE_REF}" > "${STAGING}/kantainer-registries.ya
 
 BUTANE="${STAGING}/kantainer.bu"
 
+# The console password's HASH is not made here, and the password itself never
+# enters this document (SPEC.md §spec:console-password). The machine converts it
+# during installation, because the Bash and the OpenSSL macOS ships cannot
+# produce the modern form and §req:constraints forbids requiring a Mac operator
+# to install anything extra. scripts/render-installer.sh puts the readable value
+# on the installer media; scripts/install-to-disk hashes it there and replaces
+# the placeholder below.
+#
+# Blank substitutes to the empty string, so a machine with no console password
+# renders exactly what it rendered before this field existed.
+if [[ -n "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
+    CONSOLE_PASSWORD_HASH=$'\n      password_hash: "*"'
+else
+    CONSOLE_PASSWORD_HASH=""
+fi
+
 template="$(< "${REPO_ROOT}/butane/kantainer.bu.tmpl")"
 template="$(fill "${template}" \
     "@@USERNAME@@" "$(yaml_string "${KANTAINER_USERNAME}")" \
     "@@SSH_PUBLIC_KEY@@" "$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")" \
+    "@@CONSOLE_PASSWORD_HASH@@" "${CONSOLE_PASSWORD_HASH}" \
     "@@ATTACH_IMAGE@@" "${ATTACH_IMAGE}")"
 printf '%s\n' "${template}" > "${BUTANE}"
 

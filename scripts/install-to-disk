@@ -25,7 +25,11 @@
 # of ours. This script calls `coreos-installer install` with one device, chosen
 # here.
 #
-# Usage: install-to-disk <target-drive-file> <machine-ignition>
+# It also does the one thing about the console password that cannot be done on
+# the operator's host: turn the readable value into the form the machine stores
+# (SPEC.md §spec:console-password). See kantainer_apply_console_password below.
+#
+# Usage: install-to-disk <target-drive-file> <machine-ignition> <console-password-file>
 
 set -oue pipefail
 
@@ -194,10 +198,77 @@ kantainer_select_drive() {
     done
 }
 
+# Turn the readable console password in <file> into the form the machine stores.
+#
+# THIS IS WHY THIS STEP HAPPENS HERE AND NOT ON THE OPERATOR'S HOST. The
+# supported operator hosts do not agree on a tool that can do it: the Bash and
+# the OpenSSL macOS ships cannot produce the modern form, and REQUIREMENTS.md
+# §req:constraints forbids requiring a Mac operator to install anything extra.
+# This machine can, and this is where the value is needed
+# (SPEC.md §spec:console-password).
+#
+# `-in` rather than passing the password as an argument: an argument is visible
+# in /proc to anything that can read it, and this runs while a person may be
+# standing at the console.
+#
+# `-6` is SHA-512 crypt. It is what OpenSSL will produce, and it is the form
+# LibreSSL on macOS will not - which is the whole reason for hashing here.
+# Separated from the caller so the tests can drive the failure below without a
+# machine.
+kantainer_hash_password() {
+    openssl passwd -6 -in "$1"
+}
+
+# Put the console password into the machine's specification, and print the path
+# of the specification to install.
+#
+# Prints the input path unchanged when there is no console password, so a
+# machine without one is installed from exactly the document the operator's host
+# rendered - byte for byte the machine this repository built before the field
+# existed.
+kantainer_apply_console_password() {
+    local password_file="$1" ignition="$2" hash patched
+
+    [[ -s "${password_file}" ]] || {
+        printf '%s\n' "${ignition}"
+        return 0
+    }
+
+    hash="$(kantainer_hash_password "${password_file}")" ||
+        kantainer_fail "the configuration sets a console password, but this installer cannot
+    convert it: openssl could not hash it. NOTHING HAS BEEN WRITTEN. Installing
+    without it would hand you a machine you cannot log in to at its keyboard."
+
+    # Fail rather than write whatever came back. A value that is not a hash goes
+    # into the account database as one, and the account is then unusable in a way
+    # nobody discovers until they are standing at the machine.
+    case "${hash}" in
+        \$6\$*) ;;
+        *) kantainer_fail "openssl did not produce a password hash this machine can store.
+    NOTHING HAS BEEN WRITTEN." ;;
+    esac
+
+    # mktemp gives 0600, and this is tmpfs: the live environment runs entirely in
+    # RAM, so the hash never touches a disk except inside the specification
+    # coreos-installer writes.
+    #
+    # jq --arg, never sed: a $6$ hash is mostly $ characters and every one of
+    # them means something to a substitution.
+    patched="$(mktemp)"
+    jq --arg hash "${hash}" \
+        '(.passwd.users[] | select(.passwordHash == "*")).passwordHash = $hash' \
+        < "${ignition}" > "${patched}" ||
+        kantainer_fail "could not put the console password into ${ignition}.
+    NOTHING HAS BEEN WRITTEN."
+
+    printf '%s\n' "${patched}"
+}
+
 main() {
     local target_file="${1:-/etc/kantainer/target-drive}"
     local ignition="${2:-/etc/kantainer/machine.ign}"
-    local target="" device
+    local password_file="${3:-/etc/kantainer/console-password}"
+    local target="" device installed
 
     [[ -f "${ignition}" ]] ||
         kantainer_fail "no machine configuration at ${ignition}"
@@ -208,8 +279,18 @@ main() {
 
     device="$(kantainer_select_drive "${target}")"
 
+    # After the drive rule, so a machine that is going to stop and ask has not
+    # already made a copy of the specification carrying the hash.
+    #
+    # The copy is removed on the way out; the operator's own machine.ign, which
+    # is what comes back when there is no console password, is not.
+    installed="$(kantainer_apply_console_password "${password_file}" "${ignition}")"
+    if [[ "${installed}" != "${ignition}" ]]; then
+        trap 'rm -f "${installed}"' EXIT
+    fi
+
     echo "kantainer-install: installing Fedora CoreOS to ${device}" >&2
-    coreos-installer install --ignition-file "${ignition}" "${device}"
+    coreos-installer install --ignition-file "${installed}" "${device}"
 
     {
         echo

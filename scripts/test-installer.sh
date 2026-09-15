@@ -323,6 +323,52 @@ else
     not_ok "names no drive when the configuration names none"
 fi
 
+# The console password rides on the LIVE environment's configuration, readable,
+# for the machine to hash during installation (SPEC.md §spec:console-password).
+# It is not in machine.ign, and that is the whole point: this document is RAM
+# and is gone at the first reboot, so no readable copy reaches the installed
+# machine.
+TEST_CONSOLE_PASSWORD="$(head -c 24 /dev/urandom | base64)"
+config "${WORK}/console.conf" "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+"${RENDER_INSTALLER}" "${WORK}/console.conf" > "${WORK}/console.ign"
+
+if [[ "$(file_contents "${WORK}/console.ign" /etc/kantainer/console-password)" == "${TEST_CONSOLE_PASSWORD}" ]]; then
+    ok "carries the console password for the machine to hash"
+else
+    not_ok "carries the console password for the machine to hash"
+fi
+
+# 384 = 0600, not target-drive's 0644. This one is a secret.
+if [[ "$(jq -r '.storage.files[] | select(.path == "/etc/kantainer/console-password") | .mode' "${WORK}/console.ign")" == "384" ]]; then
+    ok "keeps the console password unreadable to anyone but root"
+else
+    not_ok "keeps the console password unreadable to anyone but root"
+fi
+
+if file_contents "${WORK}/console.ign" /etc/kantainer/machine.ign |
+        grep -Fq "${TEST_CONSOLE_PASSWORD}"; then
+    not_ok "keeps the console password out of the installed machine's configuration"
+else
+    ok "keeps the console password out of the installed machine's configuration"
+fi
+
+# The installer is handed the file, or it installs a machine with no console
+# password and says nothing about it.
+if jq -r '.systemd.units[] | select(.name == "kantainer-install.service") | .contents' "${WORK}/console.ign" |
+        grep -Fq "ExecStart=/usr/local/bin/kantainer-install-to-disk /etc/kantainer/target-drive /etc/kantainer/machine.ign /etc/kantainer/console-password"; then
+    ok "hands the console password to the first-stage installer"
+else
+    not_ok "hands the console password to the first-stage installer"
+fi
+
+# Blank is a supported machine: the file is present and empty, the same shape as
+# target-drive, and the installer leaves the specification untouched.
+if [[ "$(file_contents "${WORK}/wired.ign" /etc/kantainer/console-password)" == "" ]]; then
+    ok "carries no console password when the configuration sets none"
+else
+    not_ok "carries no console password when the configuration sets none"
+fi
+
 config "${WORK}/named.conf" "KANTAINER_TARGET_DRIVE=/dev/nvme0n1"
 "${RENDER_INSTALLER}" "${WORK}/named.conf" > "${WORK}/named.ign"
 

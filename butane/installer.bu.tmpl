@@ -65,7 +65,7 @@ systemd:
         TTYPath=/dev/console
         TTYReset=yes
         TTYVHangup=yes
-        ExecStart=/usr/local/bin/kantainer-install-to-disk /etc/kantainer/target-drive /etc/kantainer/machine.ign
+        ExecStart=/usr/local/bin/kantainer-install-to-disk /etc/kantainer/target-drive /etc/kantainer/machine.ign /etc/kantainer/console-password
 
         [Install]
         WantedBy=multi-user.target
@@ -96,6 +96,32 @@ storage:
         id: 0
       contents:
         local: target-drive
+
+    # KANTAINER_CONSOLE_PASSWORD, readable, for the installer to turn into the
+    # form the machine stores (SPEC.md §spec:console-password). The conversion
+    # happens here rather than on the operator's host because the Bash and the
+    # OpenSSL macOS ships cannot produce the modern form, and REQUIREMENTS.md
+    # §req:constraints forbids requiring a Mac operator to install anything extra.
+    #
+    # IT IS DELIBERATELY NOT IN machine.ign. That document is written onto the
+    # installed machine; this one configures the live environment, which is RAM
+    # and is gone the moment the machine reboots. Keeping the readable value on
+    # this side is what makes "nothing writes a second readable copy onto the
+    # installed machine" a fact about the shape of the thing rather than a step
+    # somebody has to remember.
+    #
+    # 0600, not target-drive's 0644: this one is a secret.
+    #
+    # Empty when the operator set no console password, which is the case that
+    # leaves the machine exactly as it is today - no password on any account.
+    - path: /etc/kantainer/console-password
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: console-password
 
     # scripts/install-to-disk. /usr/local/bin because that is where Fedora
     # CoreOS expects an operator's own executables and where the SELinux policy

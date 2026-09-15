@@ -12,8 +12,9 @@
 # result in the Fedora CoreOS live ISO.
 #
 # Prints the specification to stdout and touches nothing else. It carries the
-# operator's SSH key and their Portainer password, so every intermediate file is
-# staged in a private temporary directory that is removed on exit.
+# operator's SSH key, their Portainer password and - readable, for the machine
+# to hash during installation - their console password, so every intermediate
+# file is staged in a private temporary directory that is removed on exit.
 #
 # Usage: render-installer.sh [config-file]
 
@@ -43,6 +44,17 @@ trap 'rm -rf "${STAGING}"' EXIT
 # Verbatim, with a trailing newline: the installer reads the first line and
 # takes it as the device path. Empty when the operator named no drive.
 printf '%s\n' "${KANTAINER_TARGET_DRIVE}" > "${STAGING}/target-drive"
+
+# The console password, readable, for the installer to hash ON THE MACHINE
+# (SPEC.md §spec:console-password). It travels here rather than inside
+# machine.ign so that no readable copy can reach the INSTALLED machine: this
+# document configures the live environment, which is RAM and is gone the moment
+# the machine reboots.
+#
+# No trailing newline: the file is the password and nothing else. Empty when the
+# operator set none, which is the case that leaves the machine exactly as it is
+# today - the same shape as target-drive above.
+printf '%s' "${KANTAINER_CONSOLE_PASSWORD}" > "${STAGING}/console-password"
 
 cp "${REPO_ROOT}/scripts/install-to-disk" "${STAGING}/install-to-disk"
 
