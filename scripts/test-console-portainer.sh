@@ -334,7 +334,7 @@ printf 'ANSWERED=yes\n' > "${STATE_FILE}"
 shows "an answer with no time behind it is not presented as current" \
     "Portainer port ${PORTAINER_PORT}: not checked yet"
 
-# systemd is the machine's own verdict (Â§spec:console-display says "what the
+# systemd is the machine's own verdict (§spec:console-display says "what the
 # machine's service manager says about it"), so nothing here re-derives it from
 # unit properties or the journal. What it cannot answer at all is said plainly
 # rather than guessed.
@@ -344,7 +344,7 @@ shows "a service manager that says nothing is not guessed at" 'Portainer service
 
 ### The renderer reads the probe, and the probe writes what the renderer reads
 
-# Â§spec:console-display item 5: run the probe the way the timer would, and the
+# §spec:console-display item 5: run the probe the way the timer would, and the
 # block reflects it on the next read - no reboot, no login. The REAL writer
 # against the REAL parser, over one file.
 SERVICE_STATE=active
@@ -394,7 +394,7 @@ assert "the block is written through the platform's own atomic writer" \
 
 ### Nothing on this path waits for a monitor
 
-# Â§req:constraints: the machine has a screen and a keyboard only when the
+# §req:constraints: the machine has a screen and a keyboard only when the
 # operator attaches them. The block is produced either way.
 assert "the renderer runs on an ordinary multi-user boot" \
     grep -qF 'WantedBy=multi-user.target' "${SNIPPET_UNIT}"
@@ -414,7 +414,7 @@ assert "a restarting Portainer cannot rate-limit the block into staleness" \
 
 ### Portainer starting, stopping or failing reaches the screen
 
-# Â§spec:console-display: "Portainer starting, stopping or failing are all
+# §spec:console-display: "Portainer starting, stopping or failing are all
 # reflected on the screen without a reboot and without anyone logging in". The
 # probe timer alone would get there within a minute; the operator who just
 # restarted Portainer is watching now.
