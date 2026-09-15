@@ -221,13 +221,18 @@ kantainer_hash_console_password() {
     # it: anything else here would put a machine on the stick that nobody can log
     # in to, discovered months later with a keyboard in hand.
     #
+    # THE WHOLE FORM, not the `$6$` prefix. A prefix check passes an error
+    # message that happens to start with it, a hash truncated by a full disk, and
+    # a second line appended after a good one - each of which renders into
+    # passwordHash and installs that machine. SHA-512 crypt is `$6$`, a salt, and
+    # exactly 86 characters of crypt's own alphabet, and the anchors reject
+    # anything with a newline in it.
+    #
     # The single quotes are the point: `$6$` is crypt's literal method marker for
     # SHA-512, not an expansion.
     # shellcheck disable=SC2016
-    case "${hash}" in
-        '$6$'*) ;;
-        *) return 1 ;;
-    esac
+    local sha512crypt='^\$6\$[./A-Za-z0-9]+\$[./A-Za-z0-9]{86}$'
+    [[ "${hash}" =~ ${sha512crypt} ]] || return 1
 
     printf '%s\n' "${hash}"
 }

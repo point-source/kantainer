@@ -451,7 +451,11 @@ CONSOLE_LOG="${WORK}/console-runtime.log"
 # shellcheck disable=SC2016  # the literals under test, not expansions
 FLASH_CONSOLE_PASSWORD='console-secret-$`"'"'"'\ &|%:x'
 # shellcheck disable=SC2016  # `$6$` is crypt's literal method marker
-FLASH_FIXTURE_HASH='$6$fixturesalt$fixtureHASHvalue0123456789'
+FLASH_FIXTURE_HASH='$6$fixturesalt00000$fixtureHASHvalue0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567'
+# The single quotes are the point: `$6$` is crypt's literal method marker,
+# not an expansion.
+# shellcheck disable=SC2016
+FLASH_TRUNCATED_HASH='$6$fixturesalt00000$tooShort'
 
 # Stands in for podman/docker. Records every argument and what arrived on stdin,
 # so the test can assert the password went in through one and not the other.
@@ -462,6 +466,11 @@ fake_runtime() {
         fail) return 1 ;;
         garbage) printf 'useradd: cannot open /etc/passwd\n' ;;
         empty) ;;
+        # Starts like a hash and is not one; a prefix check passes it and
+        # installs a machine nobody can log in to.
+        truncated) printf '%s\n' "${FLASH_TRUNCATED_HASH}" ;;
+        # A good hash with a second line after it. cut(1) would hand both on.
+        extra) printf '%s\n%s\n' "${FLASH_FIXTURE_HASH}" 'and another line' ;;
         *) printf '%s\n' "${FLASH_FIXTURE_HASH}" ;;
     esac
 }
@@ -517,7 +526,7 @@ fi
 # The check is on the form we need, not on how they got there: anything that is
 # not a SHA-512 crypt hash would install a machine nobody can log in to, found
 # out months later with a keyboard in hand.
-for FAKE_RUNTIME_MODE in garbage empty; do
+for FAKE_RUNTIME_MODE in garbage empty truncated extra; do
     if ( kantainer_hash_console_password fake_runtime ) > /dev/null 2>&1; then
         not_ok "refuses a ${FAKE_RUNTIME_MODE} answer that is not a stored password"
     else

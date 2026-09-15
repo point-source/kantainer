@@ -258,7 +258,7 @@ WRITE_CAPTURE="${WORK}/written-installer.iso"
 # assertions are exact.
 HASH_STDIN="${WORK}/hash-stdin"
 # shellcheck disable=SC2016  # `$6$` is crypt's literal method marker
-FIXTURE_HASH_VALUE='$6$fixturesalt$fixtureHASHvalue0123456789'
+FIXTURE_HASH_VALUE='$6$fixturesalt00000$fixtureHASHvalue0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567'
 ALIGNED_EXPECTED="${WORK}/aligned-installer.iso"
 UNALIGNED_EXPECTED="${WORK}/unaligned-installer.iso"
 FIXTURE_PATH="${BIN}:${PATH}"
