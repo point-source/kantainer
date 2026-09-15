@@ -271,7 +271,7 @@ hides "a disconnected interface produces no line of its own" "ens19"
 
 ### A machine with no address at all
 
-# §req:success-criteria 20 is about a specific bad screen: one that shows
+# §req:sc:screen-says-no-address is about a specific bad screen: one that shows
 # "https://:9443" or an address from a network the machine left. The requirement
 # is not that the block be empty - it is that the block SAY SO, because a
 # missing line reads as a display that is broken rather than a machine that has
@@ -312,7 +312,7 @@ shows "a connected interface with no usable address says so in words" \
 
 ### The block keeps up with the machine
 
-# §req:success-criteria 21 is about events, not about a boot snapshot. These run
+# §req:sc:screen-keeps-up is about events, not about a boot snapshot. These run
 # the dispatcher the way NetworkManager runs it, with a stubbed systemctl, and
 # read back what it asked for.
 DISPATCHER="${SYSTEM_FILES}/usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network"

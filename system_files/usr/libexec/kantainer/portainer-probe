@@ -47,7 +47,7 @@ PROBE_TIMEOUT=5
 #
 # /run is tmpfs and is empty at boot, which is the point: an answer that
 # survived a reboot would put a timestamp from the last boot on the screen as
-# though it were current. That is the same staleness §req:success-criteria 20
+# though it were current. That is the same staleness §req:sc:screen-says-no-address
 # forbids for the address. The directory is created by
 # /usr/lib/tmpfiles.d/kantainer.conf rather than here, because it has to exist
 # on a machine whose Portainer never started - which is exactly the machine the

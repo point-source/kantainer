@@ -101,7 +101,7 @@ fi
 
 ### The configuration names nothing
 
-# The case REQUIREMENTS.md §req:success-criteria item 2 is about: one drive, no
+# The case REQUIREMENTS.md §req:sc:unattended-install is about: one drive, no
 # keyboard. The boot medium must not be counted, or this machine stops at a
 # prompt and the whole unattended promise is gone.
 if got="$(select_drive "" "" 'sda|Samsung SSD|465.8G|S3Z8NB' "${STICK}" 2>/dev/null)" &&

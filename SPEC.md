@@ -117,15 +117,16 @@ Because the installer environment is stock Fedora CoreOS, which carries no wirel
 the installation itself requires a wired connection even on machines that will later run on
 wireless. See §spec:network-attachment.
 
-Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attributes,
-§req:priorities.
+Cites §req:sc:one-flash-command, §req:sc:unattended-install, §req:sc:push-publishes,
+§req:constraints, §req:quality-attributes, §req:priorities.
 
 ## Operator-host support §spec:operator-host-support
 
 *Status: complete* — pull requests keep the full Linux gate and add a focused Apple-silicon
-macOS 26 job through the operating system's `/bin/bash`. Deterministic Linux and macOS artifacts
-prove byte-identical configuration rendering; small real-command fixtures cover stock checksum
-tools, runtime selection and retry, device policy, mutation ordering, complete writes and sync.
+macOS 26 job through the operating system's `/bin/bash`. Deterministic Linux and macOS
+artifacts prove byte-identical configuration rendering; small real-command fixtures cover stock
+checksum tools, runtime selection and retry, device policy, mutation ordering, complete writes
+and sync.
 
 The operator runs `just config-check`, `just render`, and `just flash` on the existing Linux
 environment or an Apple-silicon Mac running macOS 26 or newer. Every path behind those commands
@@ -133,30 +134,31 @@ works with the Bash 3.2 and checksum utility supplied by macOS; unsupported syst
 before the target changes.
 
 The two hosts accept the same configuration and render byte-identical machine specifications.
-Operator values remain literal, including shell syntax and placeholder-shaped text, and duplicate
-fields remain invalid even when the first value is empty. Both hosts verify the installer against
-the repository's checksum and preserve the same valid-cache, corrupt-cache, and download outcomes.
+Operator values remain literal, including shell syntax and placeholder-shaped text, and
+duplicate fields remain invalid even when the first value is empty. Both hosts verify the
+installer against the repository's checksum and preserve the same valid-cache, corrupt-cache,
+and download outcomes.
 
-On macOS, local installer personalisation works with Docker Desktop or Podman. Docker is
-chosen when both are usable. If Docker fails and Podman is available, the operator chooses whether
-to retry; declining or a failed retry leaves the target untouched. Linux retains Podman.
+On macOS, local installer personalisation works with Docker Desktop or Podman. Docker is chosen
+when both are usable. If Docker fails and Podman is available, the operator chooses whether to
+retry; declining or a failed retry leaves the target untouched. Linux retains Podman.
 
 A pull request passes a deterministic Linux render to a focused macOS job, which compares its
 bytes and exercises the real operator commands with controlled fixtures. The broader Linux gate
-continues to cover image and installed-machine behavior; Bash 3.2 applies to operator-facing paths
-and everything they invoke.
+continues to cover image and installed-machine behavior; Bash 3.2 applies to operator-facing
+paths and everything they invoke.
 
 **Decision and constraint.** Configuration, rendering, installer fetch, and flash remain one
-contract across hosts; only operating-system capabilities differ. The compatibility gate invokes
-the complete operator paths because testing their top-level scripts alone would miss newer shell
-features or Linux-only utilities reached underneath them.
+contract across hosts; only operating-system capabilities differ. The compatibility gate
+invokes the complete operator paths because testing their top-level scripts alone would miss
+newer shell features or Linux-only utilities reached underneath them.
 
 **Alternatives rejected.** Requiring a newer Bash on macOS was rejected because it adds a
 replacement shell before the workflow begins. Executing configuration as shell input or using
 shell replacement syntax was rejected because operator values contain syntax that must stay
-literal. Requiring one macOS container runtime was rejected because either supported runtime can
-perform the work. Porting the installed-machine suite to Bash 3.2 was rejected because it lies
-outside the operator-host boundary.
+literal. Requiring one macOS container runtime was rejected because either supported runtime
+can perform the work. Porting the installed-machine suite to Bash 3.2 was rejected because it
+lies outside the operator-host boundary.
 
 **Tradeoffs.** Supporting the operating system's built-in tools leaves a small amount of
 host-specific behavior to maintain and makes two CI environments part of the release gate.
@@ -164,8 +166,9 @@ The focused macOS check does not prove a multi-gigabyte download, a physical wri
 boot. The Docker-to-Podman retry needs operator input, but it keeps one runtime's failure
 from silently changing the tool that handles the operator's personalised installer.
 
-Cites §req:success-criteria (13, 14, 18, 26), §req:user-stories,
-§req:quality-attributes (Operator-host portability, Compatibility checks), §req:constraints.
+Cites §req:sc:macos-host-commands, §req:sc:byte-identical-render, §req:sc:macos-runtime-choice,
+§req:sc:macos-support-check, §req:user-stories, §req:quality-attributes (Operator-host
+portability, Compatibility checks), §req:constraints.
 
 ## Flash target safety and write integrity §spec:flash-target-safety
 
@@ -212,9 +215,10 @@ selection, all pre-mutation refusals, exact confirmation, unmount ordering, alig
 unaligned writes, complete bytes, durability failures, Linux compatibility, and the final
 manual-eject instruction. Native macOS verification adds the disposable RAM-disk branch.
 
-Cites §req:success-criteria (1, 15, 16, 17, 26), §req:user-stories,
-§req:quality-attributes (Flash safety, Write integrity, Compatibility checks),
-§req:constraints, §req:priorities.
+Cites §req:sc:one-flash-command, §req:sc:macos-ordinary-target-rules,
+§req:sc:macos-advanced-target, §req:sc:macos-unmount-and-write, §req:sc:macos-support-check,
+§req:user-stories, §req:quality-attributes (Flash safety, Write integrity, Compatibility
+checks), §req:constraints, §req:priorities.
 
 ## Machine configuration §spec:machine-configuration
 
@@ -240,13 +244,13 @@ refused: a machine without one is a supported choice, and the check says what th
 costs (§spec:console-password).
 
 **Decision and constraint.** The Portainer password is required rather than optional, which
-departs from §req:success-criteria item 4 and §req:priorities, where it ranks sixth as
-convenience with a fallback. The fallback no longer exists: current Portainer refuses to
-create its first administrator account without a token that it prints only to its own log,
-so an operator who skips the password cannot claim the account from a browser at all and
-must connect over SSH to read the token. Requiring the password removes both that step and
-the window during which an unclaimed administration page is exposed. The operator was
-presented with the alternatives and chose this.
+departs from §req:sc:portainer-login-without-watching and §req:priorities, where it ranks sixth
+as convenience with a fallback. The fallback no longer exists: current Portainer refuses to
+create its first administrator account without a token that it prints only to its own log, so
+an operator who skips the password cannot claim the account from a browser at all and must
+connect over SSH to read the token. Requiring the password removes both that step and the
+window during which an unclaimed administration page is exposed. The operator was presented
+with the alternatives and chose this.
 
 Values live in a file on the operator's machine rather than being fetched from a server at
 boot because §req:constraints excludes a configuration server, and rather than being baked
@@ -265,7 +269,8 @@ reachable on the network with an unclaimed administrative interface — is worse
 configuration file becomes a thing the operator must not lose, since regenerating a stick
 requires it.
 
-Cites §req:success-criteria (1, 4, 10), §req:constraints, §req:quality-attributes.
+Cites §req:sc:one-flash-command, §req:sc:portainer-login-without-watching,
+§req:sc:ssh-by-key-only, §req:constraints, §req:quality-attributes.
 
 ## Drive selection §spec:drive-selection
 
@@ -281,7 +286,7 @@ where the operator can select one.
 The medium the installer booted from is never a candidate. Excluding it is a matter of
 correctness and not only of safety: a single-drive machine has the USB stick attached while
 the rule runs, so counting it would present two drives and stop at a prompt, breaking the
-unattended installation §req:success-criteria item 2 asks for. The medium is identified from
+unattended installation §req:sc:unattended-install asks for. The medium is identified from
 the live ISO's own account of itself, on the kernel command line, and the installer refuses
 outright rather than guessing if that cannot be resolved.
 
@@ -306,8 +311,7 @@ tradeoff given it occurs only in the ambiguous case.
 one until someone attaches a display. Naming the drive in the configuration file avoids the
 situation entirely, and the documentation says so.
 
-Cites §req:success-criteria (9), §req:quality-attributes, §req:priorities,
-§req:constraints.
+Cites §req:sc:multi-drive-halt, §req:quality-attributes, §req:priorities, §req:constraints.
 
 ## Network attachment §spec:network-attachment
 
@@ -344,7 +348,7 @@ mandatory was rejected as forcing configuration on the wired case, which is the 
 **Tradeoffs.** A machine that will live somewhere without ethernet must be installed
 somewhere with it. This is a one-time inconvenience at install, not an ongoing constraint.
 
-Cites §req:quality-attributes, §req:constraints, §req:success-criteria (3).
+Cites §req:quality-attributes, §req:constraints, §req:sc:portainer-in-a-browser.
 
 ## Container engine §spec:container-engine
 
@@ -396,7 +400,7 @@ Docker diverges from the base image's default, so a future base change could sil
 reverse it; the boot health check in §spec:boot-health-and-rollback treats a machine without
 a running Docker engine as a failed boot, which catches exactly that.
 
-Cites §req:problem-statement, §req:success-criteria (5), §req:quality-attributes,
+Cites §req:problem-statement, §req:sc:containers-survive-reboot, §req:quality-attributes,
 §req:constraints.
 
 ## Portainer service §spec:portainer-service
@@ -451,7 +455,9 @@ Portainer's interface and knows the password owns the machine; the password's st
 the whole of the defence, which is why §spec:machine-configuration enforces a minimum
 length.
 
-Cites §req:success-criteria (3, 4, 5, 7), §req:constraints, §req:quality-attributes.
+Cites §req:sc:portainer-in-a-browser, §req:sc:portainer-login-without-watching,
+§req:sc:containers-survive-reboot, §req:sc:data-survives-updates, §req:constraints,
+§req:quality-attributes.
 
 ## Remote access §spec:remote-access
 
@@ -467,7 +473,7 @@ operation — installing, reaching Portainer, deploying containers, updating, re
 a bad update — requires it.
 
 **Decision and constraint.** §req:quality-attributes requires key-only access and
-§req:success-criteria item 10 requires password logins to be refused. Refusing passwords
+§req:sc:ssh-by-key-only requires password logins to be refused. Refusing passwords
 outright, rather than merely not setting one, means a later change that sets a password
 somewhere cannot quietly open a door.
 
@@ -487,141 +493,146 @@ where a password would be accepted if guessed.
 physical access and a reinstall as the only recovery. For a machine whose entire
 configuration lives in a file the operator already keeps, reinstalling is cheap.
 
-Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
+Cites §req:sc:ssh-by-key-only, §req:quality-attributes, §req:constraints.
 
 ## Console display §spec:console-display
 
-*Status: complete* — not confirmed on real hardware: the build environment has no console and no
-network interface, so the screen itself is only ever rendered against fixtures. Five things for
-the first hardware run, because nothing in this repository can reach them. `agetty --show-issue`
-renders the whole screen without a reboot and answers the first three.
+*Status: complete* — not confirmed on real hardware: the build environment has no console and
+no network interface, so the screen itself is only ever rendered against fixtures. Five things
+for the first hardware run, because nothing in this repository can reach them. `agetty
+--show-issue` renders the whole screen without a reboot and answers the first three.
 
 First, the kantainer block appears *below* the platform's lines, with the Portainer lines below
-the address lines — the prefixes sort that way, but the screen is agetty's, and the tradeoff below
-already accepts that a change in the platform's snippets moves ours. Second, the block names the
-machine's real interface and omits `docker0` and the bridges Portainer creates — a filter wrong in
-the loose direction advertises an address that reaches Portainer from nowhere, and one wrong in
-the strict direction leaves the block empty. Third, plugging a cable changes the screen with
-nobody logged in, and so does the port probe's own timer. Fourth, the same `agetty --reload`
-redraws the platform's own per-interface line; that it does follows from that line being an agetty
-escape, but only a real console shows it happening. Fifth, the probe reaches Portainer's published
-port with SELinux enforcing.
+the address lines — the prefixes sort that way, but the screen is agetty's, and the tradeoff
+below already accepts that a change in the platform's snippets moves ours. Second, the block
+names the machine's real interface and omits `docker0` and the bridges Portainer creates — a
+filter wrong in the loose direction advertises an address that reaches Portainer from nowhere,
+and one wrong in the strict direction leaves the block empty. Third, plugging a cable changes
+the screen with nobody logged in, and so does the port probe's own timer. Fourth, the same
+`agetty --reload` redraws the platform's own per-interface line; that it does follows from that
+line being an agetty escape, but only a real console shows it happening. Fifth, the probe
+reaches Portainer's published port with SELinux enforcing.
 
 A wedge itself is not quite on that list. A listener that accepts a connection and then never
-completes the handshake is reproducible off the machine, and the probe was run against one by hand
-while this was built: it reported the port unanswered, bounded by its own timeout, where a bare TCP
-connect to the same listener reported it as serving. That was a one-off check and nothing in CI
-repeats it — what the tests hold is the choice it justified, that the probe makes a completed HTTPS
-request with a deadline rather than a connect. The first hardware run adds only that a wedged
+completes the handshake is reproducible off the machine, and the probe was run against one by
+hand while this was built: it reported the port unanswered, bounded by its own timeout, where a
+bare TCP connect to the same listener reported it as serving. That was a one-off check and
+nothing in CI repeats it — what the tests hold is the choice it justified, that the probe makes
+a completed HTTPS request with a deadline rather than a connect. The first hardware run adds
+only that a wedged
 *Portainer container* presents to the probe the same way a wedged socket does.
 
-With a monitor attached, the machine's login screen answers the two questions an operator standing
-at it has: what to type into a browser, and whether Portainer is there. It answers them before
-anyone logs in, and it does not require a keyboard to have been used.
+With a monitor attached, the machine's login screen answers the two questions an operator
+standing at it has: what to type into a browser, and whether Portainer is there. It answers
+them before anyone logs in, and it does not require a keyboard to have been used.
 
-Below what the platform already prints, the screen carries a kantainer block. For each network the
-machine is actually on, the block gives the machine's address written the way it is typed into a
-browser to reach Portainer, and the name of that network — the wireless network the machine
-joined, or that the connection is wired. When the machine has no address at all, the block says
-exactly that in words, rather than leaving a space where an address would be.
+Below what the platform already prints, the screen carries a kantainer block. For each network
+the machine is actually on, the block gives the machine's address written the way it is typed
+into a browser to reach Portainer, and the name of that network — the wireless network the
+machine joined, or that the connection is wired. When the machine has no address at all, the
+block says exactly that in words, rather than leaving a space where an address would be.
 
 Portainer is reported as two separate statements: what the machine's service manager says about
-it, and whether an HTTPS connection to its port was actually answered, together with when that was
-last checked. On a healthy machine the two agree. When they disagree, the screen shows the
+it, and whether an HTTPS connection to its port was actually answered, together with when that
+was last checked. On a healthy machine the two agree. When they disagree, the screen shows the
 disagreement rather than choosing one. Until the port has been checked at all, the second
 statement says so rather than reporting a refusal.
 
-The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a new
-address arriving from the router, and Portainer starting, stopping or failing are all reflected on
-the screen without a reboot and without anyone logging in. The platform's own per-interface line is
-refreshed from the same events, so it cannot sit stale next to a correct kantainer line. The
-answered-on-its-port statement refreshes on its own schedule and says when it last looked.
+The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a
+new address arriving from the router, and Portainer starting, stopping or failing are all
+reflected on the screen without a reboot and without anyone logging in. The platform's own
+per-interface line is refreshed from the same events, so it cannot sit stale next to a correct
+kantainer line. The answered-on-its-port statement refreshes on its own schedule and says when
+it last looked.
 
 This display exists only on a machine that is running its own image. During installation and
-during the window in which the machine downloads that image, the screen is whatever stock Fedora
-CoreOS shows.
+during the window in which the machine downloads that image, the screen is whatever stock
+Fedora CoreOS shows.
 
-**Decision and constraint.** §req:success-criteria items 19, 20 and 21 and §req:quality-attributes'
-console visibility require this, and §req:priorities ranks it fourth because it takes the router
-out of the first-boot path — which matters most on exactly the networks the operator does not
-administer. It is read-only and cannot lock anyone out, which is why it ranks above the console
-password.
+**Decision and constraint.** §req:sc:screen-shows-address, §req:sc:screen-says-no-address and
+§req:sc:screen-keeps-up and §req:quality-attributes' console visibility require this, and
+§req:priorities ranks it fourth because it takes the router out of the first-boot path — which
+matters most on exactly the networks the operator does not administer. It is read-only and
+cannot lock anyone out, which is why it ranks above the console password.
 
 The display extends the platform's existing console message machinery rather than replacing it.
 That machinery is already in the base image, already enumerates network interfaces, already
-redraws the login prompt the instant a cable goes up or down, and already survives updates as part
-of the platform. Writing a display of our own would reproduce all of it in order to add a handful
-of lines.
+redraws the login prompt the instant a cable goes up or down, and already survives updates as
+part of the platform. Writing a display of our own would reproduce all of it in order to add a
+handful of lines.
 
 The operator chose to keep the platform's own per-interface line and add the kantainer block
-beneath it, so that the platform's part keeps working if ours breaks. For the cheapest safety in
-the project, degrading is the right failure mode: a screen that shows an address in the platform's
-shape is worth more than a blank one.
+beneath it, so that the platform's part keeps working if ours breaks. For the cheapest safety
+in the project, degrading is the right failure mode: a screen that shows an address in the
+platform's shape is worth more than a blank one.
 
-Portainer is reported twice, at the operator's direction, because an operator is at the keyboard
-precisely when the web page did not load — the one case where a container that started and then
-wedged reads as running. A screen that agreed with the machine rather than with the operator would
-be wrong exactly when it is being read. The two statements are also kept independent of each
-other: a Portainer event never invalidates the recorded port answer, because discarding one
-statement on the other's evidence is choosing between them by another route.
+Portainer is reported twice, at the operator's direction, because an operator is at the
+keyboard precisely when the web page did not load — the one case where a container that started
+and then wedged reads as running. A screen that agreed with the machine rather than with the
+operator would be wrong exactly when it is being read. The two statements are also kept
+independent of each other: a Portainer event never invalidates the recorded port answer,
+because discarding one statement on the other's evidence is choosing between them by another
+route.
 
 The service manager's verdict is reprinted in systemd's own words rather than translated. A
-mapping into friendlier terms is this repository's copy of systemd's judgement, and it is the copy
-that goes stale when a state is added; it would also disagree in wording with the `systemctl
-status` the operator runs next.
+mapping into friendlier terms is this repository's copy of systemd's judgement, and it is the
+copy that goes stale when a state is added; it would also disagree in wording with the
+`systemctl status` the operator runs next.
 
 The port statement is a completed HTTPS request, not a TCP connect, and it is made from the
-machine itself. A connect would report a wedged TLS listener as serving, which is the exact fault
-the statement exists to catch. Asking over the loopback keeps the statement honest on a machine
-with no address at all; the cost is that it reports that Portainer is serving, not that any
-particular network path to it is open.
+machine itself. A connect would report a wedged TLS listener as serving, which is the exact
+fault the statement exists to catch. Asking over the loopback keeps the statement honest on a
+machine with no address at all; the cost is that it reports that Portainer is serving, not that
+any particular network path to it is open.
 
-Nothing here may be on the zero-touch path. §req:constraints says the machine has a screen and a
-keyboard only when the operator attaches them, so the block is produced whether or not anything is
-displaying it, and nothing waits for a display, a login, or a person.
+Nothing here may be on the zero-touch path. §req:constraints says the machine has a screen and
+a keyboard only when the operator attaches them, so the block is produced whether or not
+anything is displaying it, and nothing waits for a display, a login, or a person.
 
 **Alternatives rejected.** Replacing the platform's per-interface line with a single
-kantainer-authored block was offered and rejected by the operator: it reads better, but it makes
-the whole screen ours to break, and a fault in it leaves nothing where the platform would still
-have shown an address. Removing the SSH host key fingerprints the platform prints was rejected
-with it — they are the only way to verify this host on a first SSH connection. Reporting Portainer
-from the service manager alone was rejected as agreeing with the machine in the one case that
-brings an operator to the keyboard; probing the port alone was rejected as unable to tell a
-stopped Portainer from a wedged one. Reporting a not-yet-checked port as unanswered was rejected
-as putting a disagreement on the screen that nothing had established, during the early boot when
-someone is most likely to be reading it. Carrying the display through the install and download
-window was rejected as scope beyond the requirement; docs/verify.md already explains that window
-in prose (§spec:operator-documentation). A status dashboard or a custom program on the console was
-rejected outright: §req:quality-attributes promises the console is ordinary, with no menu and no
-recovery tool.
+kantainer-authored block was offered and rejected by the operator: it reads better, but it
+makes the whole screen ours to break, and a fault in it leaves nothing where the platform would
+still have shown an address. Removing the SSH host key fingerprints the platform prints was
+rejected with it — they are the only way to verify this host on a first SSH connection.
+Reporting Portainer from the service manager alone was rejected as agreeing with the machine in
+the one case that brings an operator to the keyboard; probing the port alone was rejected as
+unable to tell a stopped Portainer from a wedged one. Reporting a not-yet-checked port as
+unanswered was rejected as putting a disagreement on the screen that nothing had established,
+during the early boot when someone is most likely to be reading it. Carrying the display
+through the install and download window was rejected as scope beyond the requirement;
+docs/verify.md already explains that window in prose (§spec:operator-documentation). A status
+dashboard or a custom program on the console was rejected outright: §req:quality-attributes
+promises the console is ordinary, with no menu and no recovery tool.
 
-**Tradeoffs.** The address appears twice on the screen in two different shapes, and on a machine
-whose interface came up without an address the platform's line may sit above the kantainer block
-with nothing after it. Both are the accepted cost of not owning the platform's part. Something
-knocks on Portainer's port on a schedule for the life of the machine, so that statement lags
-reality by up to that interval — which is why it says when it last looked, and why a screen read
-seconds after a restart can show the two statements disagreeing while the port statement catches
-up. The block's position on the screen depends on the platform's own snippets, so a change there
-moves ours. Anyone standing at the machine learns its address and whether Portainer is serving;
-that requires physical presence, the address is not a secret to anyone already on that network,
-and the Portainer password remains the whole of the defence (§spec:portainer-service).
+**Tradeoffs.** The address appears twice on the screen in two different shapes, and on a
+machine whose interface came up without an address the platform's line may sit above the
+kantainer block with nothing after it. Both are the accepted cost of not owning the platform's
+part. Something knocks on Portainer's port on a schedule for the life of the machine, so that
+statement lags reality by up to that interval — which is why it says when it last looked, and
+why a screen read seconds after a restart can show the two statements disagreeing while the
+port statement catches up. The block's position on the screen depends on the platform's own
+snippets, so a change there moves ours. Anyone standing at the machine learns its address and
+whether Portainer is serving; that requires physical presence, the address is not a secret to
+anyone already on that network, and the Portainer password remains the whole of the defence
+(§spec:portainer-service).
 
-Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:priorities,
-§req:constraints.
+Cites §req:sc:screen-shows-address, §req:sc:screen-says-no-address, §req:sc:screen-keeps-up,
+§req:quality-attributes, §req:priorities, §req:constraints.
 
 ## Console password §spec:console-password
 
-*Status: complete* — not confirmed on real hardware: nothing in this repository can boot a machine,
-so the login itself and the boot-partition question below are both for the first hardware run. The
-conversion itself is settled rather than waiting: the coreos-installer container pinned in
-`versions.env` ships shadow-utils, and the hash it produces was checked against that digest — it
-round-trips byte-for-byte against `openssl passwd -6` with the same salt.
+*Status: complete* — not confirmed on real hardware: nothing in this repository can boot a
+machine, so the login itself and the boot-partition question below are both for the first
+hardware run. The conversion itself is settled rather than waiting: the coreos-installer
+container pinned in `versions.env` ships shadow-utils, and the hash it produces was checked
+against that digest — it round-trips byte-for-byte against `openssl passwd -6` with the same
+salt.
 
 The configuration file carries an optional console password for the machine's login account.
 
 Left blank, the machine is exactly what it is today: no account has a password, the login
-prompt cannot be satisfied by anyone, and the SSH key is the only way in. Set, the operator logs
-in at the machine's own keyboard and administers it from that session.
+prompt cannot be satisfied by anyone, and the SSH key is the only way in. Set, the operator
+logs in at the machine's own keyboard and administers it from that session.
 
 The password never reaches the network. SSH refuses password authentication for every account
 whether or not one is set (§spec:remote-access), so setting one widens physical access and
@@ -629,11 +640,12 @@ nothing else.
 
 The check refuses one shorter than twelve characters, names the field, and writes nothing — the
 same floor as the Portainer password (§spec:machine-configuration), for a different reason. A
-blank one is accepted rather than refused, and the check says plainly that a machine without one
-cannot be reached at all once its network fails, so the operator declines the insurance knowingly
-rather than discovering it later with a keyboard in their hand.
+blank one is accepted rather than refused, and the check says plainly that a machine without
+one cannot be reached at all once its network fails, so the operator declines the insurance
+knowingly rather than discovering it later with a keyboard in their hand.
 
-**Decision and constraint.** §req:success-criteria items 22 to 25 require this, and
+**Decision and constraint.** §req:sc:console-login, §req:sc:console-password-never-remote,
+§req:sc:blank-console-password-accepted and §req:sc:console-password-floor require this, and
 §req:priorities ranks it fifth: insurance rather than daily use, off unless the operator asks
 for it, and it must leave the default posture exactly as locked down as it is today. That last
 clause is why the field is optional and why nothing about a machine with a blank one changes.
@@ -643,22 +655,23 @@ Portainer password: that file's whole design is one literal value per line with 
 learn. The readable form goes no further than that file.
 
 `just flash` converts it on the operator's own host, inside the coreos-installer container that
-command already runs, and the stick carries only the result. The supported hosts do not agree on a
-tool that can do this — the Bash and the OpenSSL macOS 26 ships cannot produce the modern form, and
-§req:constraints forbids requiring a Mac operator to install anything extra — but the container is
-no new dependency: it is the same pinned image that personalises the installer media. The password
-reaches it on standard input, never in an argument, which anyone on the host could read.
+command already runs, and the stick carries only the result. The supported hosts do not agree
+on a tool that can do this — the Bash and the OpenSSL macOS 26 ships cannot produce the modern
+form, and §req:constraints forbids requiring a Mac operator to install anything extra — but the
+container is no new dependency: it is the same pinned image that personalises the installer
+media. The password reaches it on standard input, never in an argument, which anyone on the
+host could read.
 
-`just render` converts nothing and carries `passwordHash: "*"`, crypt's own "no password will ever
-match this account". A `$6$` hash has a random salt, and §spec:operator-host-support depends on
-`just render` staying containerless, deterministic and byte-identical between Linux and macOS. The
-placeholder fails closed: a machine that somehow receives an unsubstituted document has a locked
-account, not an unknown credential. After installation the password exists on the machine only in
-its account database.
+`just render` converts nothing and carries `passwordHash: "*"`, crypt's own "no password will
+ever match this account". A `$6$` hash has a random salt, and §spec:operator-host-support
+depends on `just render` staying containerless, deterministic and byte-identical between Linux
+and macOS. The placeholder fails closed: a machine that somehow receives an unsubstituted
+document has a locked account, not an unknown credential. After installation the password
+exists on the machine only in its account database.
 
 A conversion that cannot happen stops on the operator's own host, before the installer is
-downloaded and before any stick is written, naming the runtime that failed — rather than aborting
-the machine's own install into emergency mode after they have carried a stick to it.
+downloaded and before any stick is written, naming the runtime that failed — rather than
+aborting the machine's own install into emergency mode after they have carried a stick to it.
 
 Privileged commands do not ask for the password again. The base platform already grants this
 account administrative rights without a prompt, which is how key-based administration over SSH
@@ -671,37 +684,38 @@ ceremonial.
 rejected: it keeps the readable form off the stick, but macOS ships no tool that produces the
 strong form, so it would either push Mac operators onto a weak one or break the macOS support
 §spec:operator-host-support exists to provide. The container does for them what their own host
-cannot, without asking them to. Accepting either form was rejected as two paths to get wrong in a
-file whose value is the absence of syntax. Hashing on the host outside a container was rejected
-for the same macOS reason. Converting during installation, so that the readable value travelled on
-the installer media, was how this worked first and was rejected once the container turned out to
-be able to do it: it put a readable secret on a physical object that leaves the operator's desk,
-purely so the machine could scramble it later. Making `just render` emit the hash was rejected
-because a random salt breaks the byte comparison §spec:operator-host-support rests on. Making the
-console password required was rejected by §req:constraints, which makes blank a supported choice.
-Requiring the password for privileged commands was rejected because it breaks administration on
-every machine that does not set one. Logging the console in automatically, with no password, was rejected as
-strictly worse than today: it hands the machine to whoever walks up to it. A separate recovery
-account was rejected as a second identity to reason about and lock down, for no capability the
-operator's own account lacks.
+cannot, without asking them to. Accepting either form was rejected as two paths to get wrong in
+a file whose value is the absence of syntax. Hashing on the host outside a container was
+rejected for the same macOS reason. Converting during installation, so that the readable value
+travelled on the installer media, was how this worked first and was rejected once the container
+turned out to be able to do it: it put a readable secret on a physical object that leaves the
+operator's desk, purely so the machine could scramble it later. Making `just render` emit the
+hash was rejected because a random salt breaks the byte comparison §spec:operator-host-support
+rests on. Making the console password required was rejected by §req:constraints, which makes
+blank a supported choice. Requiring the password for privileged commands was rejected because
+it breaks administration on every machine that does not set one. Logging the console in
+automatically, with no password, was rejected as strictly worse than today: it hands the
+machine to whoever walks up to it. A separate recovery account was rejected as a second
+identity to reason about and lock down, for no capability the operator's own account lacks.
 
 **Tradeoffs.** The stick carries the console password as a `$6$` hash rather than in readable
 form. That is much better and it is not safe: whoever picks the stick up can attack that hash
-offline, at their own pace, and the twelve-character floor is the whole of what stands behind it.
-The asymmetry is deliberate and not yet resolved — the Portainer password is still readable both
-on the stick and on the installed machine, because neither the container nor the machine's own
-image can produce the form that service needs. That is a separate piece of work, not an oversight
-here. Setting a console password means the machine can be taken over by someone with physical
-access and that password; leaving it blank means a machine whose network has failed can only be
-reflashed. The check states that choice at the moment it is made. Changing the password later
-means rendering and reflashing, like every other value in the file. One thing to confirm on the
-first hardware run, because nothing in this repository can answer it: whether the installer leaves
-the delivered machine configuration readable in the installed machine's boot partition. It already carries the
-Portainer password, so the answer does not change this design, but it is the kind of fact this
-repository records rather than assumes.
+offline, at their own pace, and the twelve-character floor is the whole of what stands behind
+it. The asymmetry is deliberate and not yet resolved — the Portainer password is still readable
+both on the stick and on the installed machine, because neither the container nor the machine's
+own image can produce the form that service needs. That is a separate piece of work, not an
+oversight here. Setting a console password means the machine can be taken over by someone with
+physical access and that password; leaving it blank means a machine whose network has failed
+can only be reflashed. The check states that choice at the moment it is made. Changing the
+password later means rendering and reflashing, like every other value in the file. One thing to
+confirm on the first hardware run, because nothing in this repository can answer it: whether
+the installer leaves the delivered machine configuration readable in the installed machine's
+boot partition. It already carries the Portainer password, so the answer does not change this
+design, but it is the kind of fact this repository records rather than assumes.
 
-Cites §req:success-criteria (22, 23, 24, 25), §req:constraints, §req:quality-attributes,
-§req:priorities.
+Cites §req:sc:console-login, §req:sc:console-password-never-remote,
+§req:sc:blank-console-password-accepted, §req:sc:console-password-floor, §req:constraints,
+§req:quality-attributes, §req:priorities.
 
 ## Operating system updates §spec:os-updates
 
@@ -754,7 +768,7 @@ refusal is what makes its absence loud instead of silent, and it fails closed on
 it does not recognise for the same reason.
 
 **Alternatives rejected.** Keeping the base platform's prepare-but-never-apply behaviour was
-rejected as failing §req:success-criteria item 6 while appearing to satisfy it — the most
+rejected as failing §req:sc:automatic-updates while appearing to satisfy it — the most
 dangerous kind of failure, because the machine looks healthy while falling behind on fixes.
 Notifying the operator was rejected by §req:quality-attributes, which states the operator
 learns about problems by looking rather than by being paged.
@@ -764,7 +778,8 @@ the operator's own, on a home network, this is the intended trade — §req:qual
 accepts it explicitly. A reboot that lands badly is handled by
 §spec:boot-health-and-rollback.
 
-Cites §req:success-criteria (6, 7), §req:quality-attributes, §req:priorities.
+Cites §req:sc:automatic-updates, §req:sc:data-survives-updates, §req:quality-attributes,
+§req:priorities.
 
 ## Boot health and rollback §spec:boot-health-and-rollback
 
@@ -780,7 +795,7 @@ machine ends up serving again on the previous version.
 The check deliberately does not test Portainer, or anything Portainer depends on beyond
 Docker itself.
 
-**Decision and constraint.** §req:success-criteria item 8 requires automatic recovery from a
+**Decision and constraint.** §req:sc:automatic-rollback requires automatic recovery from a
 bad update. Neither uCore nor Fedora CoreOS beneath it carries any health-check machinery;
 they keep the previous version on disk and expect a person to invoke the rollback. The
 system adds the missing piece.
@@ -818,7 +833,7 @@ accident.
 **Alternatives rejected.** Including Portainer's responsiveness in the check was rejected on
 the reasoning above: a slow start or a Portainer-side fault would be misread as a bad
 operating system update. Relying on manual rollback over SSH was rejected as failing
-§req:success-criteria item 8, and because an update that breaks networking takes SSH with
+§req:sc:automatic-rollback, and because an update that breaks networking takes SSH with
 it. greenboot's own optional default health checks were rejected for the same
 strict-direction reason as Portainer: they make a DNS check against a package repository a
 *required* one, so a home network with flaky DNS would fail the boot and roll back a
@@ -841,7 +856,7 @@ behaviour in the arrangement that has not been observed on a machine, and if it 
 the symptom is silent: a machine that never rolls back. It is the first thing to confirm
 when hardware is available.
 
-Cites §req:success-criteria (8), §req:quality-attributes, §req:priorities.
+Cites §req:sc:automatic-rollback, §req:quality-attributes, §req:priorities.
 
 ## Image publication §spec:image-publication
 
@@ -894,7 +909,7 @@ so what they guard against is drift measured in months. Portainer is deliberatel
 down: it serves the administrative interface, and its fixes should arrive as fast as they are
 offered.
 
-**Decision and constraint.** §req:success-criteria item 11 asks that a push produce both a
+**Decision and constraint.** §req:sc:push-publishes asks that a push produce both a
 new published image and a new installer image with no manual step. The first half is met.
 The second is not met as written, and cannot be: an installer image is only useful once it
 carries the operator's account, key and password, and §req:quality-attributes forbids that
@@ -917,7 +932,7 @@ achieves the same reproducibility honestly.
 build minutes and time. Deferring installer production to flash time means the operator's
 machine needs the tooling to do it, which the documentation covers.
 
-Cites §req:success-criteria (11), §req:quality-attributes, §req:constraints.
+Cites §req:sc:push-publishes, §req:quality-attributes, §req:constraints.
 
 ## Operator documentation §spec:operator-documentation
 
@@ -942,7 +957,7 @@ selection and Podman behavior.
 configuration field, or relative link. It checks references rather than prose semantics; ports,
 first-boot behavior, and procedure order still require review.
 
-**Decision and constraint.** §req:success-criteria item 12 requires exactly these three documents.
+**Decision and constraint.** §req:sc:three-documents requires exactly these three documents.
 The verification procedure covers failure because installation has a period in which correct
 progress and a stopped machine look alike from outside. The macOS branch shares the flash guide
 because both hosts expose the same commands and safety contract; separate guides would duplicate
@@ -959,5 +974,7 @@ were rejected because the repository cannot decide their meaning reliably.
 Host-specific branches make the flash procedure longer, but keep the shared configuration and
 first-boot sequence in one place.
 
-Cites §req:success-criteria (12, 13, 15, 16, 17, 18), §req:user-stories,
+Cites §req:sc:three-documents, §req:sc:macos-host-commands,
+§req:sc:macos-ordinary-target-rules, §req:sc:macos-advanced-target,
+§req:sc:macos-unmount-and-write, §req:sc:macos-runtime-choice, §req:user-stories,
 §req:quality-attributes, §req:constraints, §req:priorities.

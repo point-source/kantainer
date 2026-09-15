@@ -2,7 +2,7 @@
 # Rewrite the login screen when the network changes
 # (SPEC.md §spec:console-display).
 #
-# §req:success-criteria 21: attaching a cable, joining a network, or a new
+# §req:sc:screen-keeps-up: attaching a cable, joining a network, or a new
 # address arriving from the router is reflected on the screen without a reboot
 # and without anyone logging in. NetworkManager is what knows those things
 # happened, and a dispatcher script is how it says so.

@@ -18,7 +18,7 @@
 # to an interface's address at DISPLAY time, which is what the platform's own
 # line uses and why that line can never go stale. We cannot: an interface with
 # no lease expands \4{} to nothing, leaving a blank exactly where the address
-# belongs, and §req:success-criteria 20 exists to forbid that. Writing a literal
+# belongs, and §req:sc:screen-says-no-address exists to forbid that. Writing a literal
 # address is what lets the no-address case say so in words - and it is also why
 # this script has to be re-run on network events, which is what the dispatcher
 # in /usr/lib/NetworkManager/dispatcher.d is for.
@@ -145,7 +145,7 @@ kantainer_device_lines() {
 
 # The whole block, on stdout. Never empty: a machine with no address says so,
 # because a missing line reads as a broken display rather than as a machine that
-# has nowhere to be reached (§req:success-criteria 20).
+# has nowhere to be reached (§req:sc:screen-says-no-address).
 kantainer_network_block() {
     local line key value emitted
     local device="" type="" state="" connection=""

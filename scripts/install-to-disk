@@ -18,7 +18,7 @@
 # the safety rule SPEC.md states - it is what makes rule 2 work at all. A
 # single-drive machine has the USB stick attached while this runs, so counting
 # it would present two drives, stop at a prompt, and break the unattended
-# installation REQUIREMENTS.md §req:success-criteria item 2 asks for.
+# installation REQUIREMENTS.md §req:sc:unattended-install asks for.
 #
 # coreos-installer's own unattended mode is deliberately unused: it clears every
 # attached drive rather than a named one, and it cannot be combined with a rule

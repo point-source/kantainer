@@ -33,73 +33,81 @@ goes wrong.
 
 ## Success criteria §req:success-criteria
 
-1. Flashing the installer to a USB stick takes one documented command, given the built
-   image and the operator's filled-in configuration file.
-2. A machine booted from that stick installs itself to disk and reaches a running state
-   with no keyboard input, in the single-disk case.
-3. After that first boot, typing the machine's address into a browser on the same
-   network reaches Portainer's web interface over HTTPS.
-4. The operator can log in to Portainer without having watched the boot — either with a
-   password set ahead of time in the configuration file, or by following a documented
-   step to reopen account setup.
-5. A container deployed through Portainer runs, and is still running after the machine
-   is rebooted.
-6. The machine installs operating system updates without the operator initiating them.
-7. Containers, their stored data, and Portainer's own settings are unchanged after an
-   operating system update.
-8. When an update leaves the machine unable to come up healthy, it returns to the last
-   working version on its own, with no operator action.
-9. Where the target machine has more than one drive and the configuration file does not
-   name one, the machine lists the drives it found with enough detail to tell them apart
-   and waits, rather than erasing one.
-10. The operator can reach the machine over SSH using the key named in the configuration
-    file. Password logins are refused.
-11. Changing a file in the repository and pushing produces a new published image and a
-    new installer image, without a manual build step.
-12. The repository documents three things: how to rebuild after a change, how to write
-    the installer to a USB stick, and how to confirm Portainer is up after first boot.
-13. On an Apple-silicon Mac running macOS 26 or newer, the operator can check a
-   configuration, render it, and flash an installer through the documented commands while
-   using the operating system's built-in Bash and checksum tools.
-14. Given the same configuration, macOS and Linux render byte-identical machine
-   specifications. Quotes, ampersands, backslashes, tabs, spaces, dollar signs, backticks,
-   and text that resembles a placeholder remain literal values.
-15. The ordinary macOS flash path accepts an external whole physical disk and refuses an
-   internal disk, a partition, a virtual disk, a path that is not a device, and a device
-   it cannot classify. Every refusal names what was rejected and happens before the target
-   is unmounted or written.
-16. An operator who deliberately chooses the advanced path can flash any existing block
-   or character device, including a target the ordinary path refuses. The command requires
-   a separate explicit opt-in, shows the stronger risk, and still requires the operator to
-   type the exact full device path before it unmounts or writes anything. Regular files,
-   mount points, bare device names, and nonexistent paths remain ineligible.
-17. Flashing an automatically mounted macOS target first asks for confirmation and then
-   unmounts it. If unmounting fails, no bytes are written. A successful command writes the
-   complete installer, makes the data durable, and tells the operator to eject the device
-   manually before removing it.
-18. On macOS, the flash command can build the personalised installer with Docker Desktop
-   or Podman. It prefers Docker when both are available, names a missing or failed runtime,
-   and asks before retrying a failed Docker build with Podman. Declining the retry writes
-   nothing.
-19. With a monitor attached, the machine's login screen shows its network address, which
-    network it is on, and whether Portainer is serving. All of it is readable without
-    logging in.
-20. When the machine has no network address, that screen says so plainly rather than
-    showing an empty or stale address.
-21. The screen keeps up with the machine. Attaching a cable, joining a network, or a
-    changed address is reflected there without a reboot and without a login.
-22. An operator who set a console password in the configuration file can log in at the
-    machine's own keyboard with it, and run privileged commands with it.
-23. SSH refuses password logins for every account whether or not a console password is
-    set. The console password never reaches the network.
-24. Leaving the console password blank is accepted, and the configuration check says
-    plainly that such a machine cannot be reached at all once its network fails.
-25. A console password shorter than 12 characters is refused when the configuration is
-    checked — the same floor as the Portainer password.
-26. The macOS support check runs the actual configuration, rendering, and flash command
-   paths under the built-in Bash in CI. It proves the accepted and refused device cases,
-   ordering before destructive actions, runtime choices, unmount failure, complete writes,
-   and sync using small fixtures rather than downloading or writing the full installer.
+Each criterion carries its own anchor. SPEC.md and the code cite those anchors, never a position
+in this list: a name that moves is still the same name, while a number that moves silently means
+something else. Add criteria wherever they read best — nothing depends on the order.
+
+- §req:sc:one-flash-command — Flashing the installer to a USB stick takes one documented
+  command, given the built image and the operator's filled-in configuration file.
+- §req:sc:unattended-install — A machine booted from that stick installs itself to disk and
+  reaches a running state with no keyboard input, in the single-disk case.
+- §req:sc:portainer-in-a-browser — After that first boot, typing the machine's address into a
+  browser on the same network reaches Portainer's web interface over HTTPS.
+- §req:sc:portainer-login-without-watching — The operator can log in to Portainer without
+  having watched the boot — either with a password set ahead of time in the configuration file,
+  or by following a documented step to reopen account setup.
+- §req:sc:containers-survive-reboot — A container deployed through Portainer runs, and is still
+  running after the machine is rebooted.
+- §req:sc:automatic-updates — The machine installs operating system updates without the
+  operator initiating them.
+- §req:sc:data-survives-updates — Containers, their stored data, and Portainer's own settings
+  are unchanged after an operating system update.
+- §req:sc:automatic-rollback — When an update leaves the machine unable to come up healthy, it
+  returns to the last working version on its own, with no operator action.
+- §req:sc:multi-drive-halt — Where the target machine has more than one drive and the
+  configuration file does not name one, the machine lists the drives it found with enough
+  detail to tell them apart and waits, rather than erasing one.
+- §req:sc:ssh-by-key-only — The operator can reach the machine over SSH using the key named in
+  the configuration file. Password logins are refused.
+- §req:sc:push-publishes — Changing a file in the repository and pushing produces a new
+  published image and a new installer image, without a manual build step.
+- §req:sc:three-documents — The repository documents three things: how to rebuild after a
+  change, how to write the installer to a USB stick, and how to confirm Portainer is up after
+  first boot.
+- §req:sc:macos-host-commands — On an Apple-silicon Mac running macOS 26 or newer, the operator
+  can check a configuration, render it, and flash an installer through the documented commands
+  while using the operating system's built-in Bash and checksum tools.
+- §req:sc:byte-identical-render — Given the same configuration, macOS and Linux render byte-
+  identical machine specifications. Quotes, ampersands, backslashes, tabs, spaces, dollar
+  signs, backticks, and text that resembles a placeholder remain literal values.
+- §req:sc:macos-ordinary-target-rules — The ordinary macOS flash path accepts an external whole
+  physical disk and refuses an internal disk, a partition, a virtual disk, a path that is not a
+  device, and a device it cannot classify. Every refusal names what was rejected and happens
+  before the target is unmounted or written.
+- §req:sc:macos-advanced-target — An operator who deliberately chooses the advanced path can
+  flash any existing block or character device, including a target the ordinary path refuses.
+  The command requires a separate explicit opt-in, shows the stronger risk, and still requires
+  the operator to type the exact full device path before it unmounts or writes anything.
+  Regular files, mount points, bare device names, and nonexistent paths remain ineligible.
+- §req:sc:macos-unmount-and-write — Flashing an automatically mounted macOS target first asks
+  for confirmation and then unmounts it. If unmounting fails, no bytes are written. A
+  successful command writes the complete installer, makes the data durable, and tells the
+  operator to eject the device manually before removing it.
+- §req:sc:macos-runtime-choice — On macOS, the flash command can build the personalised
+  installer with Docker Desktop or Podman. It prefers Docker when both are available, names a
+  missing or failed runtime, and asks before retrying a failed Docker build with Podman.
+  Declining the retry writes nothing.
+- §req:sc:screen-shows-address — With a monitor attached, the machine's login screen shows its
+  network address, which network it is on, and whether Portainer is serving. All of it is
+  readable without logging in.
+- §req:sc:screen-says-no-address — When the machine has no network address, that screen says so
+  plainly rather than showing an empty or stale address.
+- §req:sc:screen-keeps-up — The screen keeps up with the machine. Attaching a cable, joining a
+  network, or a changed address is reflected there without a reboot and without a login.
+- §req:sc:console-login — An operator who set a console password in the configuration file can
+  log in at the machine's own keyboard with it, and run privileged commands with it.
+- §req:sc:console-password-never-remote — SSH refuses password logins for every account whether
+  or not a console password is set. The console password never reaches the network.
+- §req:sc:blank-console-password-accepted — Leaving the console password blank is accepted, and
+  the configuration check says plainly that such a machine cannot be reached at all once its
+  network fails.
+- §req:sc:console-password-floor — A console password shorter than 12 characters is refused
+  when the configuration is checked — the same floor as the Portainer password.
+- §req:sc:macos-support-check — The macOS support check runs the actual configuration,
+  rendering, and flash command paths under the built-in Bash in CI. It proves the accepted and
+  refused device cases, ordering before destructive actions, runtime choices, unmount failure,
+  complete writes, and sync using small fixtures rather than downloading or writing the full
+  installer.
 
 ## User stories §req:user-stories
 
