@@ -30,9 +30,6 @@ case "${1-}" in
 esac
 
 # shellcheck source=/dev/null
-. "${REPO_ROOT}/scripts/ignition-lib.sh"
-
-# shellcheck source=/dev/null
 . "${REPO_ROOT}/versions.env"
 
 # Must match the name fetch-installer.sh derives from the same pin. Written out
@@ -248,6 +245,9 @@ fi
 # assertion below is something that fails silently on a machine nobody is
 # watching: a machine configuration the installer cannot read, a script systemd
 # will not execute, a unit that is present but not enabled.
+
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ignition-lib.sh"
 
 RENDER_INSTALLER="${REPO_ROOT}/scripts/render-installer.sh"
 
