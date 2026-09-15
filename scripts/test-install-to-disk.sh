@@ -260,11 +260,14 @@ else
     not_ok "a blank console password installs the specification untouched"
 fi
 
-if out="$(kantainer_apply_console_password "${WORK}/absent-password" "${WORK}/blank.ign")" &&
-    cmp -s "${out}" "${WORK}/blank.ign"; then
-    ok "no console password file at all installs the specification untouched"
+# The sentinel is written in butane/kantainer.bu.tmpl and matched here: two
+# files, one string, and nothing that makes them agree. If they drift, jq matches
+# nothing and succeeds, and the machine installs with no console password at all.
+sed 's/"\*"/"!"/' "${WORK}/machine.ign" > "${WORK}/drifted.ign"
+if ( kantainer_apply_console_password "${WORK}/console-password" "${WORK}/drifted.ign" ) > /dev/null 2>&1; then
+    not_ok "refuses when the password did not reach the specification"
 else
-    not_ok "no console password file at all installs the specification untouched"
+    ok "refuses when the password did not reach the specification"
 fi
 
 # The one thing about the live installer environment this repository cannot
@@ -282,6 +285,41 @@ if (
     not_ok "refuses to install when the password cannot be hashed"
 else
     ok "refuses to install when the password cannot be hashed"
+fi
+
+### The whole of main(), on the success path
+
+# Everything above drives one function. This drives the program, because the bug
+# this catches lives in the seam between them: an EXIT trap that referred to a
+# local of main() aborted the script AFTER a successful install, which failed
+# kantainer-install.service and fired its OnFailure=emergency.target. The
+# operator would have watched a correct install end in emergency mode, with no
+# way to tell it from a real failure.
+#
+# coreos-installer and systemctl are replaced: nothing here may write to a disk
+# or reboot anything.
+locked_ignition > "${WORK}/main.ign"
+: > "${WORK}/main-target"
+
+if (
+    # shellcheck disable=SC2329  # called by main(), which shellcheck cannot see
+    coreos-installer() { printf '%s\n' "$3" > "${WORK}/installed-from"; }
+    # shellcheck disable=SC2329
+    systemctl() { :; }
+    # shellcheck disable=SC2329
+    kantainer_list_disks() { disks_json 'sda|Samsung SSD|465.8G|S3Z8NB' "${STICK}"; }
+    main "${WORK}/main-target" "${WORK}/main.ign" "${WORK}/console-password"
+) > /dev/null 2>&1; then
+    ok "a successful install with a console password exits cleanly"
+else
+    not_ok "a successful install with a console password exits cleanly"
+fi
+
+# ...and the copy carrying the hash does not outlive it.
+if [[ -s "${WORK}/installed-from" ]] && [[ ! -e "$(cat "${WORK}/installed-from")" ]]; then
+    ok "removes the patched specification on the way out"
+else
+    not_ok "removes the patched specification on the way out"
 fi
 
 echo

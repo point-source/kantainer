@@ -38,6 +38,16 @@ kantainer_fail() {
     exit 1
 }
 
+# The patched copy of the machine specification, removed on the way out.
+#
+# Script-level rather than a local of main(), because the EXIT trap body runs
+# AFTER main() has returned and a local of main() is gone by then. Under
+# `set -u` that is an unbound-variable error: the script would exit non-zero
+# after a perfectly good install, kantainer-install.service would be failed, and
+# its OnFailure=emergency.target would replace the reboot already queued. The
+# operator would watch a correct install end in emergency mode.
+KANTAINER_PATCHED_IGNITION=""
+
 # The medium this installer booted from, as a whole disk.
 #
 # `coreos.liveiso=<volume label>` is put on the kernel command line by the live
@@ -239,15 +249,6 @@ kantainer_apply_console_password() {
     convert it: openssl could not hash it. NOTHING HAS BEEN WRITTEN. Installing
     without it would hand you a machine you cannot log in to at its keyboard."
 
-    # Fail rather than write whatever came back. A value that is not a hash goes
-    # into the account database as one, and the account is then unusable in a way
-    # nobody discovers until they are standing at the machine.
-    case "${hash}" in
-        \$6\$*) ;;
-        *) kantainer_fail "openssl did not produce a password hash this machine can store.
-    NOTHING HAS BEEN WRITTEN." ;;
-    esac
-
     # mktemp gives 0600, and this is tmpfs: the live environment runs entirely in
     # RAM, so the hash never touches a disk except inside the specification
     # coreos-installer writes.
@@ -259,6 +260,18 @@ kantainer_apply_console_password() {
         '(.passwd.users[] | select(.passwordHash == "*")).passwordHash = $hash' \
         < "${ignition}" > "${patched}" ||
         kantainer_fail "could not put the console password into ${ignition}.
+    NOTHING HAS BEEN WRITTEN."
+
+    # THE ONE THING WORTH CHECKING HERE. The `*` above is written by
+    # butane/kantainer.bu.tmpl and matched here: two files, one string, and
+    # nothing that makes them agree. Should they ever drift, jq matches nothing,
+    # SUCCEEDS, and the machine installs with no console password at all - which
+    # the operator finds out months later, standing at a keyboard, on the day
+    # they needed it. openssl's own exit status above is the check on the
+    # hashing; this is the check on the substitution landing.
+    jq -e --arg hash "${hash}" 'any(.passwd.users[]; .passwordHash == $hash)' \
+        < "${patched}" > /dev/null ||
+        kantainer_fail "the console password did not reach the machine specification.
     NOTHING HAS BEEN WRITTEN."
 
     printf '%s\n' "${patched}"
@@ -286,7 +299,8 @@ main() {
     # is what comes back when there is no console password, is not.
     installed="$(kantainer_apply_console_password "${password_file}" "${ignition}")"
     if [[ "${installed}" != "${ignition}" ]]; then
-        trap 'rm -f "${installed}"' EXIT
+        KANTAINER_PATCHED_IGNITION="${installed}"
+        trap 'rm -f "${KANTAINER_PATCHED_IGNITION}"' EXIT
     fi
 
     echo "kantainer-install: installing Fedora CoreOS to ${device}" >&2
