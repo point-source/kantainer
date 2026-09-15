@@ -430,9 +430,14 @@ assert "a Portainer that fails redraws the screen" \
 
 # The redraw must never be able to fail Portainer or hold up its start. The `-`
 # prefix makes systemd ignore the result; --no-block makes it not wait.
-assert "the redraw cannot fail Portainer" \
-    grep -qE '^Exec(Start|Stop)Post=-' "${DROPIN}"
+#
+# Both checked per directive, not with one alternation across the pair: a single
+# `^Exec(Start|Stop)Post=-` match is satisfied by whichever of the two still
+# carries the dash, so dropping it from ExecStopPost alone would let a failing
+# renderer put Portainer into "failed" on a clean stop, with the suite green.
 for event in ExecStartPost ExecStopPost; do
+    assert "the redraw cannot fail Portainer (${event})" \
+        grep -qE "^${event}=-" "${DROPIN}"
     assert "the redraw cannot delay Portainer (${event})" \
         grep -qE "^${event}=.*--no-block" "${DROPIN}"
 done

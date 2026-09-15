@@ -332,8 +332,8 @@ Restarting it is the first thing to try:
 systemctl restart kantainer-portainer.service
 ```
 
-Watch the login screen afterwards if you have a monitor on it: the service line moves
-immediately, and the port line follows within a minute.
+Watch the login screen afterwards if you have a monitor on it: the service line moves within
+seconds — briefly through `activating` — and the port line follows within a minute.
 
 Two of these are built to explain themselves rather than fail quietly:
 

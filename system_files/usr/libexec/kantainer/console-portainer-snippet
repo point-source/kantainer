@@ -93,12 +93,18 @@ kantainer_service_line() {
 kantainer_port_line() {
     local key value answered="" checked=""
 
-    while IFS='=' read -r key value; do
-        case "${key}" in
-            ANSWERED) answered="${value}" ;;
-            CHECKED_AT) checked="${value}" ;;
-        esac
-    done < <(cat "${STATE_FILE}" 2> /dev/null || true)
+    # The guard is the early-boot case, not defensive habit: before the first
+    # probe lands there is no file, and `set -e` would stop the renderer dead on
+    # the redirect. Read directly - a process substitution here would swallow a
+    # real read error silently, which is the opposite of what is wanted.
+    if [[ -r "${STATE_FILE}" ]]; then
+        while IFS='=' read -r key value; do
+            case "${key}" in
+                ANSWERED) answered="${value}" ;;
+                CHECKED_AT) checked="${value}" ;;
+            esac
+        done < "${STATE_FILE}"
+    fi
 
     if [[ -z "${checked}" ]]; then
         printf 'Portainer port %s: not checked yet\n' "${PORTAINER_PORT}"

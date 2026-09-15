@@ -507,11 +507,13 @@ redraws the platform's own per-interface line; that it does follows from that li
 escape, but only a real console shows it happening. Fifth, the probe reaches Portainer's published
 port with SELinux enforcing.
 
-A wedge itself is not on that list. A listener that accepts a connection and then never completes
-the handshake is reproducible off the machine, and the probe was run against one: it reports the
-port as unanswered, bounded by its own timeout, where a bare TCP connect to the same listener
-reports it as serving. What the first hardware run adds is only that a wedged *Portainer
-container* presents the same way to the probe as a wedged socket does.
+A wedge itself is not quite on that list. A listener that accepts a connection and then never
+completes the handshake is reproducible off the machine, and the probe was run against one by hand
+while this was built: it reported the port unanswered, bounded by its own timeout, where a bare TCP
+connect to the same listener reported it as serving. That was a one-off check and nothing in CI
+repeats it — what the tests hold is the choice it justified, that the probe makes a completed HTTPS
+request with a deadline rather than a connect. The first hardware run adds only that a wedged
+*Portainer container* presents to the probe the same way a wedged socket does.
 
 With a monitor attached, the machine's login screen answers the two questions an operator standing
 at it has: what to type into a browser, and whether Portainer is there. It answers them before
@@ -573,6 +575,10 @@ machine itself. A connect would report a wedged TLS listener as serving, which i
 the statement exists to catch. Asking over the loopback keeps the statement honest on a machine
 with no address at all; the cost is that it reports that Portainer is serving, not that any
 particular network path to it is open.
+
+Nothing here may be on the zero-touch path. §req:constraints says the machine has a screen and a
+keyboard only when the operator attaches them, so the block is produced whether or not anything is
+displaying it, and nothing waits for a display, a login, or a person.
 
 **Alternatives rejected.** Replacing the platform's per-interface line with a single
 kantainer-authored block was offered and rejected by the operator: it reads better, but it makes
