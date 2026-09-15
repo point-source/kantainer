@@ -34,6 +34,24 @@ not_ok() {
     failures=$(( failures + 1 ))
 }
 
+# assert <name> <command...> - the command's exit status is the verdict
+assert() {
+    local name="$1"
+    shift
+    if "$@" > /dev/null 2>&1; then
+        ok "${name}"
+    else
+        not_ok "${name}"
+    fi
+}
+
+# A shell file with its comment lines removed. Assertions about what a script
+# DOES have to read what it runs: every file in this batch explains itself at
+# length, and prose must not be able to satisfy a check.
+code() {
+    grep -vE '^[[:space:]]*#' "$1"
+}
+
 # The fixture state the stubbed nmcli answers from. DEVICE_SHOW is the terse
 # `device show` output; SSIDS maps a connection profile name to its SSID, which
 # is a SEPARATE nmcli call on the machine because the profile this repository
@@ -198,25 +216,48 @@ shows "a disconnected second interface does not hide the connected one" \
     "https://192.168.1.50:9443"
 hides "a disconnected interface produces no line of its own" "ens19"
 
+### A machine with no address at all
+
+# §req:success-criteria 20 is about a specific bad screen: one that shows
+# "https://:9443" or an address from a network the machine left. The requirement
+# is not that the block be empty - it is that the block SAY SO, because a
+# missing line reads as a display that is broken rather than a machine that has
+# no address.
+DEVICE_SHOW="GENERAL.DEVICE:ens18
+GENERAL.TYPE:ethernet
+GENERAL.STATE:30 (disconnected)
+GENERAL.CONNECTION:
+
+GENERAL.DEVICE:lo
+GENERAL.TYPE:loopback
+GENERAL.STATE:100 (connected (externally))
+GENERAL.CONNECTION:lo
+IP4.ADDRESS[1]:127.0.0.1/8
+"
+SSIDS=()
+
+shows "a machine with no address says so in words" "no network address"
+hides "a machine with no address shows no half-written address" "https://"
+
+assert "a machine with no address still writes a line" \
+    test -n "$(block)"
+
+# A cable that is in but has not been given a lease yet is the same screen: the
+# interface is connected, so the platform's own line for it is already there
+# with nothing after it, and ours must not sit beside it saying the same
+# nothing.
+DEVICE_SHOW="GENERAL.DEVICE:ens18
+GENERAL.TYPE:ethernet
+GENERAL.STATE:100 (connected)
+GENERAL.CONNECTION:Wired connection 1
+IP6.ADDRESS[1]:fe80::be24:11ff:fe52:a7c1/64
+"
+SSIDS=()
+
+shows "a connected interface with no usable address says so in words" \
+    "no network address"
+
 ### What the image ships, rather than what the renderer produces
-
-# assert <name> <command...> - the command's exit status is the verdict
-assert() {
-    local name="$1"
-    shift
-    if "$@" > /dev/null 2>&1; then
-        ok "${name}"
-    else
-        not_ok "${name}"
-    fi
-}
-
-# A shell file with its comment lines removed. Assertions about what a script
-# DOES have to read what it runs: every file in this batch explains itself at
-# length, and prose must not be able to satisfy a check.
-code() {
-    grep -vE '^[[:space:]]*#' "$1"
-}
 
 # agetty version-sorts /etc/issue.d. The base image writes 21_clhm_*, 22_clhm_*
 # and Fedora CoreOS's own 30_coreos_ignition_* and 30_ssh_authorized_keys there,
@@ -229,6 +270,13 @@ assert "the snippet sorts below every snippet the base image writes" \
 assert "the build enables the unit that writes the block at boot" \
     grep -qF 'systemctl enable kantainer-console-network.service' \
     <(code "${REPO_ROOT}/build_files/build.sh")
+
+# /etc/issue.d is persistent, so without this a machine moved to another network
+# would show the address it had on the old one until the generator next ran -
+# during early boot, which is when someone is most likely to be reading it.
+assert "a snippet from the last boot is removed before the screen is drawn" \
+    grep -qE '^r[[:space:]]+/etc/issue\.d/\*_kantainer_\*\.issue[[:space:]]' \
+    "${SYSTEM_FILES}/usr/lib/tmpfiles.d/kantainer.conf"
 
 echo
 if [[ "${failures}" -eq 0 ]]; then

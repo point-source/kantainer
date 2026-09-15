@@ -141,11 +141,14 @@ kantainer_device_lines() {
     done
 }
 
-# The whole block, on stdout.
+# The whole block, on stdout. Never empty: a machine with no address says so,
+# because a missing line reads as a broken display rather than as a machine that
+# has nowhere to be reached (§req:success-criteria 20).
 kantainer_network_block() {
-    local line key value
+    local line key value emitted
     local device="" type="" state="" connection=""
     local -a addresses=()
+    local -a lines=()
 
     # `-e no` turns off terse escaping: every key is read up to the first colon
     # and the rest is the value, so a network name containing a colon or a
@@ -169,8 +172,14 @@ kantainer_network_block() {
             continue
         fi
 
-        [[ -n "${device}" ]] &&
-            kantainer_device_lines "${type}" "${state}" "${connection}" ${addresses[@]+"${addresses[@]}"}
+        if [[ -n "${device}" ]]; then
+            while IFS= read -r emitted; do
+                lines+=("${emitted}")
+            done < <(
+                kantainer_device_lines "${type}" "${state}" "${connection}" \
+                    ${addresses[@]+"${addresses[@]}"}
+            )
+        fi
 
         device="" type="" state="" connection=""
         addresses=()
@@ -180,6 +189,16 @@ kantainer_network_block() {
             device show
         echo
     )
+
+    # Said in words, not left blank. The machine reaches this on a first boot
+    # with the cable out, and on any boot before DHCP has answered - both times
+    # when an operator is most likely to be standing in front of it.
+    if [[ "${#lines[@]}" -eq 0 ]]; then
+        echo 'Portainer: no network address yet - nothing to type into a browser.'
+        return 0
+    fi
+
+    printf '%s\n' "${lines[@]}"
 }
 
 main() {
