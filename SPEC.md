@@ -218,10 +218,9 @@ Cites §req:success-criteria (1, 15, 16, 17, 19), §req:user-stories,
 
 ## Machine configuration §spec:machine-configuration
 
-*Status: complete, except the optional console password* — `kantainer.conf.example` carries
-the template and `just config-check` applies the rules below. `just flash` (see
-§spec:installer-media) wraps the same check. The console password named below is specified
-in §spec:console-password and is not started.
+*Status: complete* — `kantainer.conf.example` carries the template and `just config-check`
+applies the rules below. `just flash` (see §spec:installer-media) wraps the same check. The
+console password named below is specified in §spec:console-password.
 
 The repository carries a configuration template. The operator copies it, fills it in, and
 keeps their copy out of version control. It is the only place machine-specific values
@@ -575,7 +574,9 @@ Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:prior
 
 ## Console password §spec:console-password
 
-*Status: not started*
+*Status: complete* — not yet confirmed on real hardware: nothing in this repository can boot a
+machine, so the login itself, and the question below about what the installer leaves in the boot
+partition, are both for the first hardware run.
 
 The configuration file carries an optional console password for the machine's login account.
 

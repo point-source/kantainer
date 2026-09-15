@@ -113,6 +113,23 @@ before every update; there is no second opinion to get.
 That refusal is deliberate. The alternative was a machine that updates itself from the internet
 without checking who signed the update.
 
+## Optional: confirm you can log in at the machine itself
+
+**Only if you set `KANTAINER_CONSOLE_PASSWORD`.** Skip this if you left it blank.
+
+Attach a monitor and keyboard and log in at the machine's own prompt, with the account name from
+your configuration file and that password. It is worth doing once, now, while the machine is
+still on your desk — the whole reason it exists is the day the network is gone and this is the
+only way in.
+
+You get an administrative session: privileged commands there do not ask for the password again.
+That is why the check refuses one shorter than 12 characters.
+
+If you left it blank there is nothing to test. No account has a password, the prompt cannot be
+satisfied by anyone, and your SSH key is the only way in.
+
+Either way, SSH still refuses password logins. A console password does not change that.
+
 ## How long
 
 The honest answer is that it depends on two things nobody can predict for you: how fast the

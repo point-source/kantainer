@@ -25,6 +25,7 @@ mkdir -p "${ARTIFACTS}"
 LITERALS=$'\'"&\\\t $`@@ATTACH_IMAGE@@@@SSID@@@@PSK@@'
 SSH_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHzks6d0NfXm47Zsj5rtshvfBUn5TjFUVrULCLNug5cu fixture ${LITERALS}"
 PASSWORD="portainer-test-${LITERALS}"
+CONSOLE_PASSWORD="console-test-${LITERALS}"
 SSID="network-${LITERALS}"
 PASSPHRASE="wireless-${LITERALS}"
 
@@ -36,6 +37,7 @@ printf '%s\n' \
     'KANTAINER_USERNAME=operator' \
     "KANTAINER_SSH_PUBLIC_KEY=${SSH_KEY}" \
     "KANTAINER_PORTAINER_PASSWORD=${PASSWORD}" \
+    "KANTAINER_CONSOLE_PASSWORD=${CONSOLE_PASSWORD}" \
     'KANTAINER_TARGET_DRIVE=' \
     "KANTAINER_WIFI_SSID=${SSID}" \
     "KANTAINER_WIFI_PASSPHRASE=${PASSPHRASE}" \
@@ -62,6 +64,21 @@ if [[ "${rendered_key}" != "${SSH_KEY}" ]]; then
     exit 1
 fi
 echo "ok       - just render preserves literal and placeholder-shaped text"
+
+# SPEC.md §spec:console-password: the machine makes the hash during
+# installation, precisely because the hosts this test compares do not agree on a
+# tool that can. So what the render carries is the locked placeholder, on both
+# hosts, and the artifacts stay byte-comparable - a salted hash never would be.
+rendered_hash="$(jq -r '.passwd.users[0].passwordHash' < "${RENDERED}")"
+if [[ "${rendered_hash}" != "*" ]]; then
+    echo "NOT OK   - just render did not leave the console password for the machine to hash" >&2
+    exit 1
+fi
+if grep -Fq "${CONSOLE_PASSWORD}" "${RENDERED}"; then
+    echo "NOT OK   - just render put the console password into the machine specification" >&2
+    exit 1
+fi
+echo "ok       - just render leaves the console password for the machine to hash"
 
 cp "${VALID}" "${DUPLICATE}"
 printf '%s\n' 'KANTAINER_TARGET_DRIVE=/dev/nvme0n1' >> "${DUPLICATE}"
@@ -93,6 +110,7 @@ cp "${VALID}" "${ARTIFACTS}/operator.conf"
 printf '%s\n' \
     'config-check valid: accepted' \
     'render valid: accepted' \
+    'render console password: left for the machine to hash' \
     'config-check empty-first duplicate: refused' \
     'render empty-first duplicate: refused without output' \
     > "${ARTIFACTS}/outcomes.txt"

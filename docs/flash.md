@@ -81,6 +81,25 @@ ignored line would mean the value you meant to set never arrives, and nothing wo
 
 **Optional:**
 
+- `KANTAINER_CONSOLE_PASSWORD` — the password for logging in at the machine's **own keyboard**,
+  at least 12 characters. Leave it blank and no account has a password at all.
+
+  **Leaving it blank is a supported choice.** It costs you one thing: if the machine's network
+  ever fails, you cannot reach it at all, and reflashing is the only way back in. `just
+  config-check` says so every time, so you decline it knowingly rather than discovering it with a
+  keyboard in your hand.
+
+  It never reaches the network. SSH refuses password logins for every account whether or not you
+  set this, so it widens physical access and nothing else.
+
+  Twelve characters is a floor because **the login prompt is the whole of the gate** — once past
+  it, privileged commands on the machine do not ask again.
+
+  You write it in readable form, like the Portainer password. The machine turns it into its
+  stored form during installation, and after that it exists there only in the machine's own
+  account database. Changing it later means rendering and flashing again, like every other value
+  in this file.
+
 - `KANTAINER_TARGET_DRIVE` — the drive to install to, e.g. `/dev/sda` or `/dev/nvme0n1`. Name it
   as the machine will see it. Leave blank on a single-drive machine.
 
@@ -111,9 +130,11 @@ kantainer.conf is complete.
   network:       wired
   drive:         installs to the machine's only drive, or stops and asks if there is more than one
   Portainer administrator password is set.
+  Console password is not set.
+  If this machine's network fails, you cannot reach it at all. Reflashing is the only way back.
 ```
 
-The password and the wireless passphrase are deliberately not echoed.
+The passwords and the wireless passphrase are deliberately not echoed.
 
 Add a path if your configuration lives outside the repository: `just config-check /path/to/my.conf`.
 
