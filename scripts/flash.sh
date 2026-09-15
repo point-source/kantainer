@@ -23,6 +23,8 @@ set -oue pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KANTAINER_FLASH_STAGING=""
+KANTAINER_RUNTIME=""
+KANTAINER_PODMAN_USABLE=""
 
 # The same rules `just config-check` and `just render` apply, from the same
 # library: a configuration one of them accepts is one this can build from.
@@ -34,6 +36,50 @@ KANTAINER_FLASH_STAGING=""
 
 kantainer_host() {
     uname -s
+}
+
+kantainer_runtime_usable() {
+    local runtime="$1"
+    command -v "${runtime}" > /dev/null 2>&1 &&
+        "${runtime}" info > /dev/null 2>&1
+}
+
+kantainer_select_runtime() {
+    local host="$1" docker_usable=""
+
+    KANTAINER_RUNTIME=""
+    KANTAINER_PODMAN_USABLE=""
+
+    case "${host}" in
+        Linux)
+            if ! kantainer_runtime_usable podman; then
+                kantainer_fail "Podman is not usable.
+    Start Podman or install it before flashing."
+            fi
+            KANTAINER_RUNTIME="podman"
+            KANTAINER_PODMAN_USABLE="1"
+            ;;
+        Darwin)
+            if kantainer_runtime_usable docker; then
+                docker_usable="1"
+            fi
+            if kantainer_runtime_usable podman; then
+                KANTAINER_PODMAN_USABLE="1"
+            fi
+
+            if [[ -n "${docker_usable}" ]]; then
+                KANTAINER_RUNTIME="docker"
+            elif [[ -n "${KANTAINER_PODMAN_USABLE}" ]]; then
+                KANTAINER_RUNTIME="podman"
+            else
+                kantainer_fail "Docker Desktop and Podman are not usable.
+    Start or install one of them before flashing."
+            fi
+            ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
 }
 
 # One objective predicate for the advanced path. Tests replace this boundary;
@@ -347,7 +393,7 @@ kantainer_flash_device() {
 
 main() {
     local target="${1-}" config="${2:-kantainer.conf}"
-    local device mode="ordinary" initial_facts iso staging
+    local device mode="ordinary" initial_facts iso staging host
 
     case "${target}" in
         --advanced-device=*)
@@ -375,10 +421,8 @@ main() {
         exit 1
     fi
 
-    command -v podman > /dev/null ||
-        kantainer_fail "podman is not on PATH.
-    coreos-installer publishes no portable binary, so the installer is
-    personalised in the container pinned in versions.env."
+    host="$(kantainer_host)"
+    kantainer_select_runtime "${host}"
 
     # Verified against the checksum committed to this repository, before
     # anything is written anywhere.
@@ -393,21 +437,34 @@ main() {
 
     "${REPO_ROOT}/scripts/render-installer.sh" "${config}" > "${staging}/installer.ign"
 
-    echo "flash: building the installer for ${KANTAINER_USERNAME}'s machine" >&2
-
-    # The pinned coreos-installer, by digest. The cache is mounted read-only so
-    # a customise cannot damage the verified copy; label=disable because both
-    # mounts are the operator's own directories and relabelling their ISO cache
-    # to suit a container is not this command's business.
-    podman run --rm \
-        --security-opt label=disable \
-        --volume "$(dirname "${iso}"):/iso:ro" \
-        --volume "${staging}:/out:rw" \
-        "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
-        iso customize \
-        --live-ignition /out/installer.ign \
-        --output "/out/installer.iso" \
-        "/iso/$(basename "${iso}")"
+    # The pinned coreos-installer, by digest. The verified ISO cache is mounted
+    # read-only and only the private staging directory is writable. Podman also
+    # disables relabelling of those operator-owned directories.
+    case "${KANTAINER_RUNTIME}" in
+        docker)
+            echo "flash: building the installer with Docker Desktop" >&2
+            docker run --rm \
+                --volume "$(dirname "${iso}"):/iso:ro" \
+                --volume "${staging}:/out:rw" \
+                "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
+                iso customize \
+                --live-ignition /out/installer.ign \
+                --output "/out/installer.iso" \
+                "/iso/$(basename "${iso}")"
+            ;;
+        podman)
+            echo "flash: building the installer with Podman" >&2
+            podman run --rm \
+                --security-opt label=disable \
+                --volume "$(dirname "${iso}"):/iso:ro" \
+                --volume "${staging}:/out:rw" \
+                "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
+                iso customize \
+                --live-ignition /out/installer.ign \
+                --output "/out/installer.iso" \
+                "/iso/$(basename "${iso}")"
+            ;;
+    esac
 
     kantainer_flash_device "${staging}/installer.iso" "${device}" "${mode}" "${initial_facts}"
 }

@@ -103,7 +103,35 @@ printf '%s\n' \
 
 printf '%s\n' \
     '#!/bin/bash' \
-    'printf "podman\n" >> "${FIXTURE_EVENT_LOG}"' \
+    'printf "docker %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
+    'if [[ "$1" == "info" ]]; then' \
+    '    [[ -n "${FIXTURE_DOCKER_USABLE-}" ]]' \
+    '    exit' \
+    'fi' \
+    '[[ "$1" == "run" ]] || exit 2' \
+    'out=""' \
+    'while [[ "$#" -gt 0 ]]; do' \
+    '    if [[ "$1" == "--volume" && "$2" == *:/out:rw ]]; then' \
+    '        out="${2%:/out:rw}"' \
+    '        shift 2' \
+    '    else' \
+    '        shift' \
+    '    fi' \
+    'done' \
+    '[[ -n "${out}" ]] || exit 2' \
+    'i=0' \
+    'while [[ "${i}" -lt 4096 ]]; do printf x; i=$(( i + 1 )); done > "${out}/installer.iso"' \
+    '[[ -z "${FIXTURE_UNALIGNED-}" ]] || printf y >> "${out}/installer.iso"' \
+    > "${BIN}/docker"
+
+printf '%s\n' \
+    '#!/bin/bash' \
+    'printf "podman %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
+    'if [[ "$1" == "info" ]]; then' \
+    '    [[ -n "${FIXTURE_PODMAN_USABLE-}" ]]' \
+    '    exit' \
+    'fi' \
+    '[[ "$1" == "run" ]] || exit 2' \
     'out=""' \
     'while [[ "$#" -gt 0 ]]; do' \
     '    if [[ "$1" == "--volume" && "$2" == *:/out:rw ]]; then' \
@@ -163,6 +191,8 @@ chmod +x "${BIN}"/*
 EVENT_LOG="${WORK}/events.log"
 INFO_COUNT="${WORK}/info-count"
 FIXTURE_PATH="${BIN}:${PATH}"
+FIXTURE_DOCKER_USABLE=""
+FIXTURE_PODMAN_USABLE="1"
 
 # fetch-installer's cache lives under the repository by design. Remove only
 # the exact fixture file this test creates, and leave a pre-existing cache
@@ -177,6 +207,8 @@ fi
 reset_fixture() {
     : > "${EVENT_LOG}"
     rm -f "${INFO_COUNT}"
+    FIXTURE_DOCKER_USABLE=""
+    FIXTURE_PODMAN_USABLE="1"
 }
 
 run_fixture() {
@@ -188,8 +220,10 @@ run_fixture() {
             FIXTURE_UNAME="${host}" \
             FIXTURE_CLASS="${class}" \
             FIXTURE_CHANGE="${change}" \
+            FIXTURE_DOCKER_USABLE="${FIXTURE_DOCKER_USABLE}" \
             FIXTURE_EVENT_LOG="${EVENT_LOG}" \
             FIXTURE_INFO_COUNT="${INFO_COUNT}" \
+            FIXTURE_PODMAN_USABLE="${FIXTURE_PODMAN_USABLE}" \
             TMPDIR="${WORK}" \
             just flash "${device}" "${WORK}/operator.conf"
     )
@@ -219,6 +253,51 @@ assert_refused_before_mutation "a regular file" "${WORK}/regular-file" external
 assert_refused_before_mutation "a mount point" "${WORK}/mount-point" external
 assert_refused_before_mutation "a bare device name" disk7 external
 assert_refused_before_mutation "an unknown platform" /dev/disk7 external Plan9
+
+assert_runtime_success() {
+    local name="$1" selected="$2" docker_usable="$3" podman_usable="$4" other
+    reset_fixture
+    FIXTURE_DOCKER_USABLE="${docker_usable}"
+    FIXTURE_PODMAN_USABLE="${podman_usable}"
+    if [[ "${selected}" == "docker" ]]; then
+        other="podman"
+    else
+        other="docker"
+    fi
+
+    if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+            > "${WORK}/runtime.out" 2> "${WORK}/runtime.err" &&
+        grep -q "^${selected} run " "${EVENT_LOG}" &&
+        ! grep -q "^${other} run " "${EVENT_LOG}" &&
+        grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
+        grep -q '^sync$' "${EVENT_LOG}"; then
+        ok "${name}"
+    else
+        not_ok "${name}"
+        cat "${WORK}/runtime.err" >&2
+        cat "${EVENT_LOG}" >&2
+    fi
+}
+
+assert_runtime_success "Docker-only macOS uses Docker" docker 1 ""
+assert_runtime_success "Podman-only macOS uses Podman" podman "" 1
+assert_runtime_success "macOS prefers Docker when both runtimes are usable" docker 1 1
+
+reset_fixture
+FIXTURE_DOCKER_USABLE=""
+FIXTURE_PODMAN_USABLE=""
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/no-runtime.out" 2> "${WORK}/no-runtime.err"; then
+    not_ok "refuses macOS with no usable runtime"
+elif grep -qF 'Docker Desktop' "${WORK}/no-runtime.err" &&
+    grep -qF 'Podman' "${WORK}/no-runtime.err" &&
+    ! grep -Eq '^(docker|podman) run |^diskutil unmountDisk|^dd |^sync$' "${EVENT_LOG}"; then
+    ok "refuses macOS with no usable runtime before target mutation"
+else
+    not_ok "refuses macOS with no usable runtime before target mutation"
+    cat "${WORK}/no-runtime.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
 
 reset_fixture
 if run_fixture /dev/disk7 external $'/dev/disk7\n' > "${WORK}/success.out" 2> "${WORK}/success.err" &&
