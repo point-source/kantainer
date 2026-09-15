@@ -612,11 +612,12 @@ Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:prior
 ## Console password §spec:console-password
 
 *Status: complete* — not confirmed on real hardware: nothing in this repository can boot a
-machine, so three things wait for the first hardware run — the login itself, the boot-partition
-question below, and whether the live installer environment carries a tool that can produce the
-stored form at all. Only the last can stop an install, and it stops it the right way: nothing is
-written and the screen says why, rather than a machine arriving quietly without the password the
-operator asked for.
+machine, so the login itself and the boot-partition question below are both for the first
+hardware run. A third question — whether the live environment carries a tool that can produce the
+stored form at all — is settled rather than waiting: the Fedora CoreOS release pinned in
+`versions.env` ships OpenSSL, checked against that release itself rather than assumed. The
+conversion still fails closed if a future release ever drops it: nothing is written and the screen
+says why, rather than a machine arriving quietly without the password the operator asked for.
 
 The configuration file carries an optional console password for the machine's login account.
 

@@ -37,7 +37,7 @@ else
 fi
 
 echo "${CONFIG} is complete."
-echo "  login account: ${KANTAINER_USERNAME}, by SSH key only"
+echo "  login account: ${KANTAINER_USERNAME}, SSH by key only"
 echo "  network:       ${network}"
 echo "  drive:         ${drive}"
 echo "  Portainer administrator password is set."

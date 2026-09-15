@@ -126,7 +126,7 @@ to go and fix, then says what machine your file describes:
 
 ```
 kantainer.conf is complete.
-  login account: <name>, by SSH key only
+  login account: <name>, SSH by key only
   network:       wired
   drive:         installs to the machine's only drive, or stops and asks if there is more than one
   Portainer administrator password is set.
