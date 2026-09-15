@@ -49,6 +49,36 @@ Portainer starts.
 The machine takes whatever address your router hands out. It assumes no fixed address, and it is
 not given one.
 
+**If you have a monitor attached, the login screen already tells you.** Below the Fedora CoreOS
+lines and the SSH host key fingerprints, the machine prints what to type into a browser — one
+line per network it is on:
+
+```
+Portainer at https://192.168.1.50:9443 (wired)
+Portainer at https://192.168.1.51:9443 (wireless: Kitchen)
+```
+
+You do not need to log in to read it, and you do not need to have been watching. It keeps up with
+the machine on its own: plug in a cable, move it to another network, or let the router hand out a
+new address, and the screen changes without a reboot.
+
+When the machine has no address at all it says so:
+
+```
+Portainer: no network address yet - nothing to type into a browser.
+```
+
+That is a machine that is up and has nowhere to be reached yet — usually a cable that is out, or
+a first boot before the router has answered. Docker's own networks never appear here; they are
+addresses the machine talks to itself on, not ones you can reach it at.
+
+**This display only exists once the machine is running its own image.** During the installation
+and during the window in which it downloads that image, the screen is whatever stock Fedora
+CoreOS shows. If you are watching an early boot and see no kantainer line, read [When Portainer
+does not answer](#when-portainer-does-not-answer) below rather than assuming something broke.
+
+Without a monitor, find the address the other way.
+
 **Look at your router's device list or DHCP leases.** Nothing here sets the machine's hostname,
 so do not go looking for one called `kantainer` — it will appear under whatever Fedora CoreOS
 reports by default. Two reliable ways to pick it out:
@@ -216,6 +246,11 @@ rpm-ostree status
   a registry it could not reach look different there.
 - **Nothing to see, and `rpm-ostree status` already shows the kantainer image** — the attach is
   done. The machine is past this stage; carry on to the next section.
+
+**A monitor shows no kantainer line during this window, and that is correct.** The address lines
+come from the kantainer image, and the machine is still downloading it — the screen is stock
+Fedora CoreOS until the attach finishes and it reboots. An absent line here says nothing about
+whether the download is going well; the `systemctl status` above is what answers that.
 
 ## What to look at once the machine is running its own image
 

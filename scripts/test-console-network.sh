@@ -142,6 +142,29 @@ shows "a wireless lease is shown as a complete browser address" "https://192.168
 shows "a wireless connection names the network that was joined" "Kitchen"
 hides "a wireless connection does not name the profile" "kantainer-wireless"
 
+# agetty reads a backslash as the start of an escape sequence, and an SSID is
+# whatever the operator typed into their configuration file. Unescaped, a
+# network called "Up\Stairs" would put "Up" followed by agetty's idea of \S on
+# the screen. Nothing else about the name is second-guessed - the operator owns
+# what they named their network.
+DEVICE_SHOW="GENERAL.DEVICE:wlan0
+GENERAL.TYPE:wifi
+GENERAL.STATE:100 (connected)
+GENERAL.CONNECTION:kantainer-wireless
+IP4.ADDRESS[1]:192.168.1.51/24
+"
+SSIDS=([kantainer-wireless]='Up\Stairs')
+
+shows "a backslash in the network's name is escaped for agetty" 'Up\\Stairs'
+
+# A profile whose SSID cannot be read at all. The line says wireless and stops,
+# rather than trailing off after a colon with nothing behind it - the same rule
+# as the no-address case.
+SSIDS=()
+
+shows "an unreadable network name leaves no empty slot" \
+    "https://192.168.1.51:9443 (wireless)"
+
 ### Two networks at once
 
 DEVICE_SHOW="GENERAL.DEVICE:ens18
