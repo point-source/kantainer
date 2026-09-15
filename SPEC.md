@@ -492,9 +492,9 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 ## Console display §spec:console-display
 
 *Status: complete* — not confirmed on real hardware: the build environment has no console and no
-network interface, so every check runs against fixtures. Six things for the first hardware run,
-because nothing in this repository can reach them. `agetty --show-issue` renders the whole screen
-without a reboot and answers the first three.
+network interface, so the screen itself is only ever rendered against fixtures. Five things for
+the first hardware run, because nothing in this repository can reach them. `agetty --show-issue`
+renders the whole screen without a reboot and answers the first three.
 
 First, the kantainer block appears *below* the platform's lines, with the Portainer lines below
 the address lines — the prefixes sort that way, but the screen is agetty's, and the tradeoff below
@@ -505,9 +505,13 @@ the strict direction leaves the block empty. Third, plugging a cable changes the
 nobody logged in, and so does the port probe's own timer. Fourth, the same `agetty --reload`
 redraws the platform's own per-interface line; that it does follows from that line being an agetty
 escape, but only a real console shows it happening. Fifth, the probe reaches Portainer's published
-port with SELinux enforcing. Sixth, and least reachable of all: a container that started and then
-wedged cannot be produced in CI, so the fixtures prove that the disagreement *renders* — not that
-a real wedge is detected.
+port with SELinux enforcing.
+
+A wedge itself is not on that list. A listener that accepts a connection and then never completes
+the handshake is reproducible off the machine, and the probe was run against one: it reports the
+port as unanswered, bounded by its own timeout, where a bare TCP connect to the same listener
+reports it as serving. What the first hardware run adds is only that a wedged *Portainer
+container* presents the same way to the probe as a wedged socket does.
 
 With a monitor attached, the machine's login screen answers the two questions an operator standing
 at it has: what to type into a browser, and whether Portainer is there. It answers them before

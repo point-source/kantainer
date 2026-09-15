@@ -191,8 +191,12 @@ assert "the redraw cannot be satisfied by an already-queued job" \
     grep -qE '^ExecStartPost=.*restart' "${PROBE_UNIT}"
 
 # --no-block so the probe unit does not sit waiting on the renderer.
+#
+# Anchored to the directive. Both unit files EXPLAIN --no-block in a comment, so
+# an unanchored match here would be satisfied by the prose after the flag itself
+# had been deleted - the exact failure the code() helper above exists to stop.
 assert "the probe does not wait for the screen to be redrawn" \
-    grep -qF -- '--no-block' "${PROBE_UNIT}"
+    grep -qE '^ExecStartPost=.*--no-block' "${PROBE_UNIT}"
 
 # The timer is what gets enabled; the service is what it starts. Enabling the
 # service instead would run the probe once at boot and never again.
@@ -428,8 +432,10 @@ assert "a Portainer that fails redraws the screen" \
 # prefix makes systemd ignore the result; --no-block makes it not wait.
 assert "the redraw cannot fail Portainer" \
     grep -qE '^Exec(Start|Stop)Post=-' "${DROPIN}"
-assert "the redraw cannot delay Portainer" \
-    grep -qF -- '--no-block' "${DROPIN}"
+for event in ExecStartPost ExecStopPost; do
+    assert "the redraw cannot delay Portainer (${event})" \
+        grep -qE "^${event}=.*--no-block" "${DROPIN}"
+done
 
 assert "the build enables the renderer" \
     grep -qF 'systemctl enable kantainer-console-portainer.service' \
