@@ -122,9 +122,10 @@ Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attrib
 
 ## Operator-host support §spec:operator-host-support
 
-*Status: in progress* — configuration checking, machine-specification rendering, stock-tool
-checksum verification, runtime selection and retry, and the Linux/macOS flash safety and write
-paths are implemented with deterministic fixtures. Pull-request macOS CI wiring remains.
+*Status: complete* — pull requests keep the full Linux gate and add a focused Apple-silicon
+macOS 26 job through the operating system's `/bin/bash`. Deterministic Linux and macOS artifacts
+prove byte-identical configuration rendering; small real-command fixtures cover stock checksum
+tools, runtime selection and retry, device policy, mutation ordering, complete writes and sync.
 
 The operator can run `just config-check`, `just render`, and `just flash` on the existing
 Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
@@ -197,9 +198,9 @@ Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
 ## Flash target safety and write integrity §spec:flash-target-safety
 
 *Status: complete* — controlled fixtures exercise the Linux and macOS paths through the real
-`just flash` command. The macOS harness also carries a disposable RAM-disk check for a Mac
-runner; the current Linux runner cannot execute that branch, and a physical USB write is not
-a release gate.
+`just flash` command, including complete aligned and unaligned writes and failure ordering. The
+pull-request macOS job also runs the disposable RAM-disk check with native device tools; a
+physical USB write remains outside the release gate.
 
 Linux keeps its established whole-disk rule, including internal disks. The ordinary macOS
 path accepts only an external whole physical disk and refuses partitions, internal or virtual
@@ -731,8 +732,10 @@ Cites §req:success-criteria (11), §req:quality-attributes, §req:constraints.
 
 ## Operator documentation §spec:operator-documentation
 
-*Status: in progress* — the Linux rebuild, flash, and verification procedures exist and are
-indexed from the README; the flash procedure does not yet cover the supported macOS path.
+*Status: complete* — the README indexes the rebuild, flash, and verification procedures. The
+single flash guide covers the supported Linux and macOS host branches, every target-safety and
+write-integrity outcome, and the final manual eject; repository-owned references are checked by
+`just ci`.
 
 Three procedures the operator can follow without reconstructing anything from memory: how to
 rebuild after changing something, how to write the installer to a USB stick, and how to confirm

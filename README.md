@@ -10,8 +10,8 @@ and [SPEC.md](SPEC.md) for how it works.
 
 - [Rebuild after a change](docs/rebuild.md) — what to edit, the gate to run, what pushing does,
   and how to tell a build published.
-- [Flash the installer to a USB stick](docs/flash.md) — filling in the configuration file, the
-  single flash command, and what it asks before it erases anything.
+- [Flash the installer to a USB stick](docs/flash.md) — the Linux and Apple-silicon macOS paths,
+  target selection, the single flash command, and every step that can stop or alter the disk.
 - [Confirm Portainer is up after first boot](docs/verify.md) — the two reboots, the certificate
   warning, the login page, and what to check when Portainer does not answer.
 
@@ -27,6 +27,11 @@ just ci
 `just ci` is the single gate: Justfile formatting, Containerfile and shell lint, workflow and
 YAML lint, a check that the pinned base image in `Containerfile` still agrees with
 `versions.env`, and every `scripts/test-*.sh`. Run it before landing anything.
+
+Pull requests also run `just test-macos-compat` through the Bash built into macOS 26 on an
+Apple-silicon runner. It checks the real configuration, rendering and flash commands with small
+fixtures and compares the rendered bytes with Linux; it does not download the full installer or
+write a physical disk.
 
 `just build` builds the image locally with podman. `just --list` shows the rest.
 
