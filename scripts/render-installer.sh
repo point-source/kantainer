@@ -41,7 +41,7 @@ command -v butane > /dev/null ||
     It is pinned in mise.toml: run \`mise install\`."
 
 # mktemp gives 0700, and the trap is armed before the machine configuration -
-# which contains the password - is written into it.
+# which contains the Portainer password - is written into it.
 STAGING="$(mktemp -d)"
 trap 'rm -rf "${STAGING}"' EXIT
 
@@ -50,17 +50,6 @@ trap 'rm -rf "${STAGING}"' EXIT
 # Verbatim, with a trailing newline: the installer reads the first line and
 # takes it as the device path. Empty when the operator named no drive.
 printf '%s\n' "${KANTAINER_TARGET_DRIVE}" > "${STAGING}/target-drive"
-
-# The console password, readable, for the installer to hash ON THE MACHINE
-# (SPEC.md §spec:console-password). It travels here rather than inside
-# machine.ign so that no readable copy can reach the INSTALLED machine: this
-# document configures the live environment, which is RAM and is gone the moment
-# the machine reboots.
-#
-# No trailing newline: the file is the password and nothing else. Empty when the
-# operator set none, which is the case that leaves the machine exactly as it is
-# today - the same shape as target-drive above.
-printf '%s' "${KANTAINER_CONSOLE_PASSWORD}" > "${STAGING}/console-password"
 
 cp "${REPO_ROOT}/scripts/install-to-disk" "${STAGING}/install-to-disk"
 

@@ -65,10 +65,15 @@ if [[ "${rendered_key}" != "${SSH_KEY}" ]]; then
 fi
 echo "ok       - just render preserves literal and placeholder-shaped text"
 
-# SPEC.md §spec:console-password: the machine makes the hash during
-# installation, precisely because the hosts this test compares do not agree on a
-# tool that can. So what the render carries is the locked placeholder, on both
-# hosts, and the artifacts stay byte-comparable - a salted hash never would be.
+# SPEC.md §spec:console-password: `just flash` makes the hash, in a container,
+# and `just render` never does. THIS TEST IS THE REASON. It byte-compares the
+# rendered bytes between Linux and macOS, and a $6$ hash carries a random salt
+# that would differ on every run. So what the render carries is the locked
+# placeholder, on both hosts, and the artifacts stay comparable.
+#
+# The outcome strings below are part of those compared bytes. Rewording one
+# means regenerating the reference artifacts on both hosts, so they say what
+# they have always said.
 rendered_hash="$(jq -r '.passwd.users[0].passwordHash' < "${RENDERED}")"
 if [[ "${rendered_hash}" != "*" ]]; then
     echo "NOT OK   - just render did not leave the console password for the machine to hash" >&2
