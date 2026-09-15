@@ -492,8 +492,8 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 
 ## Console display §spec:console-display
 
-*Status: the network half is in the image; the Portainer half is not started.* The address and
-network-name lines, their no-address wording and their currency all ship — a snippet at
+*Status: in progress* — the network half is in the image; the Portainer half is not started. The
+address and network-name lines, their no-address wording and their currency all ship — a snippet at
 `/etc/issue.d/90_kantainer_network.issue`, written by
 `/usr/libexec/kantainer/console-network-snippet` at boot and on every NetworkManager link and
 address event. The two Portainer statements below are not built. Not yet confirmed on real
