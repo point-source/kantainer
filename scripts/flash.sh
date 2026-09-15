@@ -567,13 +567,13 @@ kantainer_convert_console_password() {
             KANTAINER_RUNTIME="podman"
             return 0
         fi
+        kantainer_fail "Podman could not convert the console password. Nothing was written to ${device}."
     fi
 
-    kantainer_fail "could not convert the console password into the form the machine stores.
-    Nothing was written to ${device}. ${KANTAINER_RUNTIME} could not run
-    ${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}, or it did not answer
-    with a password hash. Installing without it would hand you a machine you
-    cannot log in to at its keyboard."
+    kantainer_fail "${KANTAINER_RUNTIME} could not convert the console password.
+    It could not run the pinned coreos-installer image, or it did not answer with
+    a password hash. Nothing was written to ${device}. Installing without the
+    password would hand you a machine you cannot log in to at its keyboard."
 }
 
 main() {
