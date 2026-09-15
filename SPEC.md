@@ -122,9 +122,9 @@ Cites §req:success-criteria (1, 2, 11), §req:constraints, §req:quality-attrib
 
 ## Operator-host support §spec:operator-host-support
 
-*Status: in progress* — configuration checking and machine-specification rendering now
-use the shared Bash 3.2-compatible parser and literal renderer, with deterministic fixtures
-for host-byte comparison. Checksum, runtime, flash, and macOS CI support remain.
+*Status: in progress* — configuration checking, machine-specification rendering, stock-tool
+checksum verification, and the Linux/macOS flash safety and write paths are implemented with
+deterministic fixtures. Runtime selection and macOS CI wiring remain.
 
 The operator can run `just config-check`, `just render`, and `just flash` on the existing
 Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
@@ -196,7 +196,11 @@ Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
 
 ## Flash target safety and write integrity §spec:flash-target-safety
 
-*Status: not started*
+*Status: complete* — the existing Linux whole-disk rule remains, and the macOS ordinary,
+advanced, reclassification, confirmation, unmount, adaptive write, sync, failure, and
+manual-eject paths run through controlled fixtures and the real `just flash` entry point.
+The macOS-only harness includes a disposable RAM-disk write, but that branch remains
+unobserved in the current Linux runner; a physical USB write is not a release gate.
 
 On Linux, the flash command preserves its existing target rule: it accepts a whole disk,
 including an internal disk, after showing its current identity and receiving exact-path
