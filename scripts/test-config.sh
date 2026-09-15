@@ -369,9 +369,9 @@ fi
 assert_jq "the login account carries a locked password placeholder" \
     '.passwd.users[0].passwordHash' "*"
 
-# §spec:console-password: "Nothing in kantainer writes a second readable copy
-# onto the installed machine." This document IS the installed machine, so the
-# password has no business anywhere in it.
+# §spec:console-password: "After installation the password exists on the machine
+# only in its account database." This document IS the installed machine, so the
+# readable password has no business anywhere in it.
 if grep -Fq "${TEST_CONSOLE_PASSWORD}" "${WORK}/out.json"; then
     not_ok "the console password never reaches the machine specification"
 else

@@ -613,11 +613,11 @@ Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:prior
 
 *Status: complete* — not confirmed on real hardware: nothing in this repository can boot a
 machine, so the login itself and the boot-partition question below are both for the first
-hardware run. A third question — whether the live environment carries a tool that can produce the
-stored form at all — is settled rather than waiting: the Fedora CoreOS release pinned in
-`versions.env` ships OpenSSL, checked against that release itself rather than assumed. The
-conversion still fails closed if a future release ever drops it: nothing is written and the screen
-says why, rather than a machine arriving quietly without the password the operator asked for.
+hardware run. The question of whether a tool exists to produce the stored form is settled rather
+than waiting, and it is settled on the operator's host: the coreos-installer container pinned in
+`versions.env` ships the whole of shadow-utils, and the hash it produces was checked against that
+digest rather than assumed — it round-trips byte-for-byte against `openssl passwd -6` with the
+same salt.
 
 The configuration file carries an optional console password for the machine's login account.
 
@@ -645,15 +645,26 @@ whole design is one literal value per line with no syntax to learn, and the stic
 object whose loss costs a reflash and a rotated Portainer password. A second readable secret
 beside the first does not change that cost.
 
-The machine converts it into its stored form during installation rather than the operator's
-host, because the supported hosts do not agree on a tool that can: the Bash and the OpenSSL that
-macOS 26 ships cannot produce the modern form, and §req:constraints forbids requiring a Mac
-operator to install anything extra. The readable value therefore travels on the installer media
-rather than inside the machine's own configuration — the live environment is RAM and is gone at
-the first reboot, which makes "no second readable copy on the installed machine" a property of
-the shape of the thing rather than a step someone has to remember. After installation the
-password exists there only in the account database. A machine whose specification never reaches
-that conversion is left with a locked account, not an unknown credential: this fails closed.
+`just flash` converts it into its stored form on the operator's own host, inside the
+coreos-installer container that command already runs, and the stick carries only the result. The
+supported hosts do not agree on a tool that can do this — the Bash and the OpenSSL macOS 26 ships
+cannot produce the modern form, and §req:constraints forbids requiring a Mac operator to install
+anything extra — but the container is not a new dependency: it is the same pinned image, by
+digest, that personalises the installer media, so a Mac operator installs nothing they did not
+already need. The password goes in on that container's standard input and never into an argument,
+which anyone on the host could read.
+
+`just render` does not convert anything and carries `passwordHash: "*"`, crypt's own "no password
+will ever match this account". That is not a shortcut: a `$6$` hash has a random salt, and
+§spec:operator-host-support depends on `just render` staying containerless, deterministic and
+byte-identical between Linux and macOS. The placeholder also fails closed — a machine that somehow
+receives an unsubstituted document has a locked account rather than an unknown credential. After
+installation the password exists on the machine only in its account database.
+
+The conversion failing is now something the operator watches happen. It stops on their own host,
+before the installer is even downloaded and before anything is written to a stick, and says which
+runtime could not do it — rather than aborting the machine's own install into emergency mode after
+they have written a stick and carried it to the machine.
 
 Privileged commands do not ask for the password again. The base platform already grants this
 account administrative rights without a prompt, which is how key-based administration over SSH
@@ -665,8 +676,14 @@ ceremonial.
 **Alternatives rejected.** Having the operator supply a pre-scrambled password was offered and
 rejected: it keeps the readable form off the stick, but macOS ships no tool that produces the
 strong form, so it would either push Mac operators onto a weak one or break the macOS support
-§spec:operator-host-support exists to provide. Accepting either form was rejected as two paths
-to get wrong in a file whose value is the absence of syntax. Making the console password
+§spec:operator-host-support exists to provide. The container does for them what their own host
+cannot, without asking them to. Accepting either form was rejected as two paths to get wrong in a
+file whose value is the absence of syntax. Hashing on the host outside a container was rejected
+for the same macOS reason. Converting during installation, so that the readable value travelled on
+the installer media, was how this worked first and was rejected once the container turned out to
+be able to do it: it put a readable secret on a physical object that leaves the operator's desk,
+purely so the machine could scramble it later. Making `just render` emit the hash was rejected
+because a random salt breaks the byte comparison §spec:operator-host-support rests on. Making the console password
 required was rejected by §req:constraints, which makes blank a supported choice. Requiring the
 password for privileged commands was rejected because it breaks administration on every machine
 that does not set one. Logging the console in automatically, with no password, was rejected as
@@ -674,9 +691,15 @@ strictly worse than today: it hands the machine to whoever walks up to it. A sep
 account was rejected as a second identity to reason about and lock down, for no capability the
 operator's own account lacks.
 
-**Tradeoffs.** The stick carries two readable secrets instead of one. Anyone past the login
-prompt has administrative access with no further challenge, so the password's strength is the
-whole of the console defence — the same shape, and the same floor, as Portainer's. Setting one
+**Tradeoffs.** The stick carries the console password as a `$6$` hash rather than in readable
+form. That is much better and it is not safe: whoever picks the stick up can attack that hash
+offline, at their own pace, and the twelve-character floor is the whole of what stands behind it.
+The asymmetry is deliberate and not yet resolved — the Portainer password is still readable both
+on the stick and on the installed machine, because neither the container nor the machine's own
+image can produce the form that service needs. That is a separate piece of work, not an oversight
+here. Anyone past the login prompt has administrative access with no further challenge, so the
+password's strength is the whole of the console defence — the same shape, and the same floor, as
+Portainer's. Setting one
 means the machine can be taken over by someone with physical access and the password; leaving
 it blank means a machine whose network has failed can only be reflashed. The check states that
 choice at the moment it is made. Changing the password later means rendering and reflashing,

@@ -95,10 +95,12 @@ ignored line would mean the value you meant to set never arrives, and nothing wo
   Twelve characters is a floor because **the login prompt is the whole of the gate** — once past
   it, privileged commands on the machine do not ask again.
 
-  You write it in readable form, like the Portainer password. The machine turns it into its
-  stored form during installation, and after that it exists there only in the machine's own
-  account database. Changing it later means rendering and flashing again, like every other value
-  in this file.
+  You write it in readable form, like the Portainer password. `just flash` scrambles it on your
+  own machine, using the container it already runs, so the stick carries the scrambled form and
+  never your readable password — and after installation it exists on the machine only in its own
+  account database. A scrambled password is not a safe one: anyone who picks the stick up can
+  attack it offline, which is what the 12-character floor is for. Changing it later means
+  rendering and flashing again, like every other value in this file.
 
 - `KANTAINER_TARGET_DRIVE` — the drive to install to, e.g. `/dev/sda` or `/dev/nvme0n1`. Name it
   as the machine will see it. Leave blank on a single-drive machine.

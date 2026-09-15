@@ -71,19 +71,20 @@ echo "ok       - just render preserves literal and placeholder-shaped text"
 # that would differ on every run. So what the render carries is the locked
 # placeholder, on both hosts, and the artifacts stay comparable.
 #
-# The outcome strings below are part of those compared bytes. Rewording one
-# means regenerating the reference artifacts on both hosts, so they say what
-# they have always said.
+# The outcome strings below are part of those compared bytes. Both hosts run
+# this same script in the same CI run, so rewording one is safe - but reword it
+# in one place only, or the comparison fails for a reason that has nothing to do
+# with portability.
 rendered_hash="$(jq -r '.passwd.users[0].passwordHash' < "${RENDERED}")"
 if [[ "${rendered_hash}" != "*" ]]; then
-    echo "NOT OK   - just render did not leave the console password for the machine to hash" >&2
+    echo "NOT OK   - just render carried something other than the locked placeholder" >&2
     exit 1
 fi
 if grep -Fq "${CONSOLE_PASSWORD}" "${RENDERED}"; then
     echo "NOT OK   - just render put the console password into the machine specification" >&2
     exit 1
 fi
-echo "ok       - just render leaves the console password for the machine to hash"
+echo "ok       - just render leaves the locked placeholder for the flash path"
 
 cp "${VALID}" "${DUPLICATE}"
 printf '%s\n' 'KANTAINER_TARGET_DRIVE=/dev/nvme0n1' >> "${DUPLICATE}"
@@ -115,7 +116,7 @@ cp "${VALID}" "${ARTIFACTS}/operator.conf"
 printf '%s\n' \
     'config-check valid: accepted' \
     'render valid: accepted' \
-    'render console password: left for the machine to hash' \
+    'render console password: locked placeholder, hashed by the flash path' \
     'config-check empty-first duplicate: refused' \
     'render empty-first duplicate: refused without output' \
     > "${ARTIFACTS}/outcomes.txt"
