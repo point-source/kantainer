@@ -255,7 +255,7 @@ assert_refused_before_mutation "a bare device name" disk7 external
 assert_refused_before_mutation "an unknown platform" /dev/disk7 external Plan9
 
 assert_runtime_success() {
-    local name="$1" selected="$2" docker_usable="$3" podman_usable="$4" other
+    local name="$1" selected="$2" docker_usable="$3" podman_usable="$4" other runtime_command
     reset_fixture
     FIXTURE_DOCKER_USABLE="${docker_usable}"
     FIXTURE_PODMAN_USABLE="${podman_usable}"
@@ -265,12 +265,20 @@ assert_runtime_success() {
         other="docker"
     fi
 
+    runtime_command=""
     if run_fixture /dev/disk7 external $'/dev/disk7\n' \
             > "${WORK}/runtime.out" 2> "${WORK}/runtime.err" &&
+        runtime_command="$(grep "^${selected} run " "${EVENT_LOG}")" &&
+        [[ "$(grep -c "^${selected} run " "${EVENT_LOG}")" -eq 1 ]] &&
         grep -q "^${selected} run " "${EVENT_LOG}" &&
         ! grep -q "^${other} run " "${EVENT_LOG}" &&
+        [[ "${runtime_command}" == *" --volume ${REPO_ROOT}/output/installer:/iso:ro "* ]] &&
+        [[ "${runtime_command}" == *" --volume "*":/out:rw "* ]] &&
+        [[ "${runtime_command}" == *" ${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST} iso customize --live-ignition /out/installer.ign --output /out/installer.iso /iso/"* ]] &&
         grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
-        grep -q '^sync$' "${EVENT_LOG}"; then
+        grep -q '^sync$' "${EVENT_LOG}" &&
+        { [[ "${selected}" == "podman" && "${runtime_command}" == *" --security-opt label=disable "* ]] ||
+          [[ "${selected}" == "docker" && "${runtime_command}" != *" --security-opt "* ]]; }; then
         ok "${name}"
     else
         not_ok "${name}"

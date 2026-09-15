@@ -82,6 +82,27 @@ kantainer_select_runtime() {
     esac
 }
 
+kantainer_personalize_installer() {
+    local runtime="$1" iso="$2" staging="$3"
+    local -a runtime_options
+
+    case "${runtime}" in
+        docker) runtime_options=() ;;
+        podman) runtime_options=(--security-opt label=disable) ;;
+        *) return 2 ;;
+    esac
+
+    "${runtime}" run --rm \
+        "${runtime_options[@]}" \
+        --volume "$(dirname "${iso}"):/iso:ro" \
+        --volume "${staging}:/out:rw" \
+        "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
+        iso customize \
+        --live-ignition /out/installer.ign \
+        --output "/out/installer.iso" \
+        "/iso/$(basename "${iso}")"
+}
+
 # One objective predicate for the advanced path. Tests replace this boundary;
 # ordinary selection trusts diskutil/lsblk's own verdict instead.
 kantainer_device_node_exists() {
@@ -443,28 +464,12 @@ main() {
     case "${KANTAINER_RUNTIME}" in
         docker)
             echo "flash: building the installer with Docker Desktop" >&2
-            docker run --rm \
-                --volume "$(dirname "${iso}"):/iso:ro" \
-                --volume "${staging}:/out:rw" \
-                "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
-                iso customize \
-                --live-ignition /out/installer.ign \
-                --output "/out/installer.iso" \
-                "/iso/$(basename "${iso}")"
             ;;
         podman)
             echo "flash: building the installer with Podman" >&2
-            podman run --rm \
-                --security-opt label=disable \
-                --volume "$(dirname "${iso}"):/iso:ro" \
-                --volume "${staging}:/out:rw" \
-                "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
-                iso customize \
-                --live-ignition /out/installer.ign \
-                --output "/out/installer.iso" \
-                "/iso/$(basename "${iso}")"
             ;;
     esac
+    kantainer_personalize_installer "${KANTAINER_RUNTIME}" "${iso}" "${staging}"
 
     kantainer_flash_device "${staging}/installer.iso" "${device}" "${mode}" "${initial_facts}"
 }
