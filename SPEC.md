@@ -127,70 +127,42 @@ macOS 26 job through the operating system's `/bin/bash`. Deterministic Linux and
 prove byte-identical configuration rendering; small real-command fixtures cover stock checksum
 tools, runtime selection and retry, device policy, mutation ordering, complete writes and sync.
 
-The operator can run `just config-check`, `just render`, and `just flash` on the existing
-Linux environment and on an Apple-silicon Mac running macOS 26 or newer. The complete path
-behind those commands works with the Bash 3.2 supplied by macOS; the operator does not
-install another shell. An unsupported operating system is refused with a message that names
-the unsupported platform before a target device is changed.
+The operator runs `just config-check`, `just render`, and `just flash` on the existing Linux
+environment or an Apple-silicon Mac running macOS 26 or newer. Every path behind those commands
+works with the Bash 3.2 and checksum utility supplied by macOS; unsupported systems are refused
+before the target changes.
 
-Given the same repository state and configuration, Linux and macOS accept and refuse the
-same configuration values and render byte-identical machine specifications. Quotes,
-ampersands, backslashes, tabs, spaces, dollar signs, backticks, and text that resembles a
-template placeholder remain literal. Replacement text is never interpreted as syntax,
-matched again recursively, or changed by a later placeholder replacement. Configuration
-checking continues to reject duplicate fields exactly, including when the first occurrence
-has an empty value.
-
-The Fedora CoreOS installer is verified against the repository's pinned checksum on both
-hosts. A supported Mac uses checksum facilities supplied with the operating system, while
-preserving the existing behavior for valid downloads, corrupt downloads, and corrupt cached
-copies; macOS support requires no separate checksum package.
+The two hosts accept the same configuration and render byte-identical machine specifications.
+Operator values remain literal, including shell syntax and placeholder-shaped text, and duplicate
+fields remain invalid even when the first value is empty. Both hosts verify the installer against
+the repository's checksum and preserve the same valid-cache, corrupt-cache, and download outcomes.
 
 On macOS, local installer personalisation works with Docker Desktop or Podman. Docker is
-chosen when both are usable, and Podman is chosen when Docker is absent. If Docker is
-present but its personalisation attempt fails while Podman is available, the failure is
-named and the operator chooses whether to retry with Podman. Declining, reaching end of
-input, or a failed Podman attempt ends the command without touching the target. Linux keeps
-its established Podman behavior.
+chosen when both are usable. If Docker fails and Podman is available, the operator chooses whether
+to retry; declining or a failed retry leaves the target untouched. Linux retains Podman.
 
-A pull request runs a focused macOS compatibility check through the real operator commands
-and the operating system's built-in Bash. It covers configuration, byte-identical rendering,
-checksum verification, runtime choice, and the flash flow with small controlled inputs. The
-broader Linux test suite may retain newer Bash features because it validates the image and
-installed-machine behavior as well as operator commands; the Bash 3.2 floor applies to the
-operator-facing paths and everything they invoke.
+A pull request passes a deterministic Linux render to a focused macOS job, which compares its
+bytes and exercises the real operator commands with controlled fixtures. The broader Linux gate
+continues to cover image and installed-machine behavior; Bash 3.2 applies to operator-facing paths
+and everything they invoke.
 
-**Decision and constraint.** The existing shared configuration, rendering, installer-fetch,
-and flash behavior remains one contract across hosts, with host differences confined to the
-capabilities the operating system supplies. This extends the current architecture because
-§req:success-criteria requires the same documented workflow on a stock supported Mac, and
-§req:quality-attributes requires the two hosts to produce the same installer from the same
-inputs. A compatibility claim that covered only the top-level scripts would still fail as
-soon as a command reached a newer shell feature or a Linux-only utility underneath them.
+**Decision and constraint.** Configuration, rendering, installer fetch, and flash remain one
+contract across hosts; only operating-system capabilities differ. The compatibility gate invokes
+the complete operator paths because testing their top-level scripts alone would miss newer shell
+features or Linux-only utilities reached underneath them.
 
 **Alternatives rejected.** Requiring a newer Bash on macOS was rejected because it adds a
-replacement shell before the promised one-command workflow can begin. Executing the
-configuration as shell input was rejected because operator values include shell syntax and
-secrets. Shell pattern replacement and general-purpose text substitution were rejected for
-operator values because their replacement syntax changes across Bash versions and gives
-special meaning to characters the configuration contract declares literal. Requiring one
-container runtime on every host was rejected because supported Mac operators commonly have
-either Docker Desktop or Podman. Porting the complete Linux suite to Bash 3.2 was rejected
-because its installed-machine checks are outside the operator-host boundary and a focused
-Mac check exercises the compatibility promise directly.
+replacement shell before the workflow begins. Executing configuration as shell input or using
+shell replacement syntax was rejected because operator values contain syntax that must stay
+literal. Requiring one macOS container runtime was rejected because either supported runtime can
+perform the work. Porting the installed-machine suite to Bash 3.2 was rejected because it lies
+outside the operator-host boundary.
 
 **Tradeoffs.** Supporting the operating system's built-in tools leaves a small amount of
 host-specific behavior to maintain and makes two CI environments part of the release gate.
 The focused macOS check does not prove a multi-gigabyte download, a physical write, or a
 boot. The Docker-to-Podman retry needs operator input, but it keeps one runtime's failure
 from silently changing the tool that handles the operator's personalised installer.
-
-**User-level verification.** On a supported Mac with no replacement shell or checksum
-package, the operator checks and renders a configuration containing every literal character
-and placeholder-shaped value named above, and obtains the same bytes as the Linux run. With
-small installer fixtures, a contributor observes the Docker-only, Podman-only, Docker-first,
-accepted-retry, declined-retry, corrupt-download, and corrupt-cache outcomes through the real
-commands; the pull request's macOS check repeats those paths under the built-in Bash.
 
 Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
 §req:quality-attributes (Operator-host portability, Compatibility checks), §req:constraints.
@@ -737,11 +709,9 @@ single flash guide covers the supported Linux and macOS host branches, every tar
 write-integrity outcome, and the final manual eject; repository-owned references are checked by
 `just ci`.
 
-Three procedures the operator can follow without reconstructing anything from memory: how to
-rebuild after changing something, how to write the installer to a USB stick, and how to confirm
-Portainer is up after first boot. The third also states what to check when Portainer does not
-answer, so that a machine which stopped part-way through installation is distinguishable from one
-that is merely still working.
+The three procedures cover rebuilding, flashing, and confirming Portainer after first boot. The
+verification guide also distinguishes a machine that stopped during installation from one still
+working.
 
 The flash procedure states the supported operator hosts and their prerequisites. For macOS it
 shows how to list external physical disks, requires the full `/dev/diskN` path, explains the
@@ -751,53 +721,26 @@ priority, the prompted Podman retry, and the difference between a failure before
 failure that may have left a partial target. The Linux procedure retains its existing whole-disk
 selection and Podman behavior.
 
-`scripts/test-docs.sh`, which `just ci` runs, fails when the documentation names a `just` recipe,
-a repository path, a `kantainer-*` unit, a configuration field or a relative link this repository
-no longer has. It decides names, not meaning: a procedure whose steps have gone stale while every
-name in it still resolves passes. Ports and first-boot behaviour are checked by reading, because
-nothing in the build environment can reach a machine.
+`just ci` rejects documentation that names a missing repository-owned recipe, path, unit,
+configuration field, or relative link. It checks references rather than prose semantics; ports,
+first-boot behavior, and procedure order still require review.
 
 **Decision and constraint.** §req:success-criteria item 12 requires exactly these three documents.
-The verification procedure is expanded to cover the not-yet-working case because this system's
-install has a legitimate multi-minute window during which correct behaviour and failure look
-identical from outside — see §spec:installer-media. A procedure that only describes success would
-leave the operator guessing during precisely the interval where guessing is likely.
+The verification procedure covers failure because installation has a period in which correct
+progress and a stopped machine look alike from outside. The macOS branch shares the flash guide
+because both hosts expose the same commands and safety contract; separate guides would duplicate
+destructive instructions and let them drift. Unmeasured durations are omitted in favor of signals
+that identify each completed phase.
 
-The macOS instructions live in the same flash procedure because §req:success-criteria item 13
-promises the same three commands on both supported hosts. A separate Mac guide would duplicate the
-configuration and first-boot contract and allow the destructive steps to drift between documents.
-
-The documentation is written after the system is built, per §req:priorities, so that it describes
-what exists. That ordering changed what shipped, in one way worth recording: the first-boot
-sequence has never been watched on hardware, for the reason §spec:installer-media gives. Every
-claim in the verification procedure is therefore traced to the code path that produces it, and the
-procedure states no durations at all — only the signal that ends each phase. Telling an operator
-"about two minutes" when nobody has held a stopwatch would be worse than telling them nothing,
-because that guess is what decides them the machine is broken.
-
-**Alternatives rejected.** Documenting only the success path was rejected for the reason above.
-Deferring documentation entirely was rejected by §req:success-criteria item 12. Stating expected
-durations was rejected as unmeasured — an invented number fails the operator exactly where the
-procedure is supposed to help. Checking the documentation's prose, ports or upstream unit names
-was rejected: none is decidable from what this repository holds, and a check that wrongly passes
-is worse than no check.
-
-A separate macOS flash guide was rejected because the one-command workflow has one safety
-contract and should have one authoritative procedure. Presenting only the ordinary path was
-rejected because the advanced device override is intentionally available and too destructive to
-leave discoverable only from command output.
+**Alternatives rejected.** A success-only procedure would leave installation failures ambiguous.
+A separate macOS guide would duplicate one safety contract, while omitting advanced mode would
+hide an intentionally available destructive path. Automated prose, port, or upstream-unit checks
+were rejected because the repository cannot decide their meaning reliably.
 
 **Tradeoffs.** Documentation written last is documentation that can be cut under pressure.
 §req:priorities accepts that ranking while stating the repository is worth little without it.
 Host-specific branches make the flash procedure longer, but keep the shared configuration and
 first-boot sequence in one place.
-
-**User-level verification.** Starting from the README on either supported host, an operator can
-find the flash procedure, install only the named prerequisites, identify an eligible target, run
-the command, predict every prompt and target mutation, and follow the success or failure guidance
-without consulting source code. Documentation checks prove that every referenced command, path,
-configuration field, unit, and link still exists; a semantic review follows both host branches
-against §spec:operator-host-support and §spec:flash-target-safety.
 
 Cites §req:success-criteria (12, 13, 15, 16, 17, 18), §req:user-stories,
 §req:quality-attributes, §req:constraints, §req:priorities.
