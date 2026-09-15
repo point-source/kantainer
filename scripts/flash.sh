@@ -459,8 +459,10 @@ main() {
         kantainer_fail "no device given.
     Usage: just flash <device> [config-file]
     Advanced: just flash --advanced-device=<device> [config-file]
-    List what is attached with:
-        lsblk --nodeps --output NAME,MODEL,SIZE"
+    List Linux drives with:
+        lsblk --nodeps --output NAME,MODEL,SIZE
+    List macOS external physical disks with:
+        diskutil list external physical"
 
     kantainer_load_config "${config}"
     kantainer_validate_config "${config}"
