@@ -10,8 +10,8 @@
 # The file is PARSED, not sourced. It carries a password, and sourcing it would
 # put the operator on the hook for shell-quoting exactly the characters a good
 # password contains: $ ` " ' \ and spaces. Instead every value is taken
-# literally — everything after the first `=` to the end of the line. This is the
-# shape os-release and systemd's EnvironmentFile already use.
+# literally — everything after the first `=` to the end of the line, with no
+# quoting or escape syntax.
 
 # The complete set of fields. A key outside this list is a refusal rather than a
 # silently ignored line: a misspelt field name is otherwise indistinguishable
