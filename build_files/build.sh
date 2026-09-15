@@ -247,6 +247,13 @@ systemctl enable greenboot-healthcheck.service
 # This unit puts it there. See the script for the whole reasoning.
 systemctl enable kantainer-greenboot-grub.service
 
+# The login screen's address lines (SPEC.md §spec:console-display). This is the
+# boot-time run; the NetworkManager dispatcher restarts the same unit on every
+# link and address change afterwards. Enabling it is what makes the block appear
+# on a machine that boots onto a network and is never touched again - and
+# nothing about it waits for a monitor, a login, or a person.
+systemctl enable kantainer-console-network.service
+
 # The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
 # no exit status above reports it. If greenboot ever dropped that line, the
 # enable would still succeed and the machine would run the health check, report

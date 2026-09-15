@@ -1,0 +1,22 @@
+[Unit]
+Description=Show this machine's address and network on the login screen
+Documentation=https://github.com/point-source/kantainer
+After=NetworkManager.service
+
+# Deliberately NOT Requires=NetworkManager.service. A machine whose network
+# manager failed still has a login screen, and the honest thing to put on it is
+# the no-address line - which is exactly what the generator writes when there is
+# nothing to report. Refusing to run would leave the screen with whatever the
+# last boot wrote instead.
+
+[Service]
+Type=oneshot
+
+# No RemainAfterExit=yes, unlike this repository's other oneshot units. Those
+# run once per boot; this one is restarted by the NetworkManager dispatcher
+# every time a cable, a network or an address changes, and a unit left "active
+# (exited)" would report the wrong thing about work that runs continuously.
+ExecStart=/usr/libexec/kantainer/console-network-snippet
+
+[Install]
+WantedBy=multi-user.target
