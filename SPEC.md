@@ -491,101 +491,110 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 
 ## Console display §spec:console-display
 
-*Status: in progress* — the network half is in the image; the Portainer half is not started. The
-address and network-name lines, their no-address wording and their currency all ship — a snippet at
-`/etc/issue.d/90_kantainer_network.issue`, written by
-`/usr/libexec/kantainer/console-network-snippet` at boot and on every NetworkManager link and
-address event. The two Portainer statements below are not built. Not yet confirmed on real
-hardware: the build environment has no console and no network interface, so every check runs
-against fixture NetworkManager output.
+*Status: complete* — not confirmed on real hardware: the build environment has no console and no
+network interface, so every check runs against fixtures. Six things for the first hardware run,
+because nothing in this repository can reach them. `agetty --show-issue` renders the whole screen
+without a reboot and answers the first three.
 
-Four things to capture on the first hardware run, because nothing in this repository can reach
-them. `agetty --show-issue` renders the whole screen without a reboot and answers the first two.
-First, the kantainer block appears *below* the platform's lines: the `90_` prefix sorts under
-every snippet the pinned base image writes, but the screen is agetty's, and the tradeoff below
+First, the kantainer block appears *below* the platform's lines, with the Portainer lines below
+the address lines — the prefixes sort that way, but the screen is agetty's, and the tradeoff below
 already accepts that a change in the platform's snippets moves ours. Second, the block names the
-machine's real interface and omits `docker0` and the bridges Portainer creates — a filter wrong
-in the loose direction advertises an address that reaches Portainer from nowhere, and one wrong
-in the strict direction leaves the block empty. Third, plugging a cable changes the screen with
-nobody logged in. Fourth, the same `agetty --reload` redraws the platform's own per-interface
-line; that it does follows from that line being an agetty escape, but only a real console shows
-it happening.
+machine's real interface and omits `docker0` and the bridges Portainer creates — a filter wrong in
+the loose direction advertises an address that reaches Portainer from nowhere, and one wrong in
+the strict direction leaves the block empty. Third, plugging a cable changes the screen with
+nobody logged in, and so does the port probe's own timer. Fourth, the same `agetty --reload`
+redraws the platform's own per-interface line; that it does follows from that line being an agetty
+escape, but only a real console shows it happening. Fifth, the probe reaches Portainer's published
+port with SELinux enforcing. Sixth, and least reachable of all: a container that started and then
+wedged cannot be produced in CI, so the fixtures prove that the disagreement *renders* — not that
+a real wedge is detected.
 
-With a monitor attached, the machine's login screen answers the two questions an operator
-standing at it has: what to type into a browser, and whether Portainer is there. It answers
-them before anyone logs in, and it does not require a keyboard to have been used.
+With a monitor attached, the machine's login screen answers the two questions an operator standing
+at it has: what to type into a browser, and whether Portainer is there. It answers them before
+anyone logs in, and it does not require a keyboard to have been used.
 
-Below what the platform already prints, the screen carries a kantainer block. For each
-network the machine is actually on, the block gives the machine's address written the way it
-is typed into a browser to reach Portainer, and the name of that network — the wireless
-network the machine joined, or that the connection is wired. When the machine has no address
-at all, the block says exactly that in words, rather than leaving a space where an address
-would be.
+Below what the platform already prints, the screen carries a kantainer block. For each network the
+machine is actually on, the block gives the machine's address written the way it is typed into a
+browser to reach Portainer, and the name of that network — the wireless network the machine
+joined, or that the connection is wired. When the machine has no address at all, the block says
+exactly that in words, rather than leaving a space where an address would be.
 
-Portainer is reported as two separate statements: what the machine's service manager says
-about it, and whether an HTTPS connection to its port was actually answered, together with
-when that was last checked. On a healthy machine the two agree. When they disagree, the
-screen shows the disagreement rather than choosing one.
+Portainer is reported as two separate statements: what the machine's service manager says about
+it, and whether an HTTPS connection to its port was actually answered, together with when that was
+last checked. On a healthy machine the two agree. When they disagree, the screen shows the
+disagreement rather than choosing one. Until the port has been checked at all, the second
+statement says so rather than reporting a refusal.
 
-The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a
-new address arriving from the router, and Portainer starting, stopping or failing are all
-reflected on the screen without a reboot and without anyone logging in. The platform's own
-per-interface line is refreshed from the same events, so it cannot sit stale next to a
-correct kantainer line. The answered-on-its-port statement refreshes on its own schedule and
-says when it last looked.
+The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a new
+address arriving from the router, and Portainer starting, stopping or failing are all reflected on
+the screen without a reboot and without anyone logging in. The platform's own per-interface line is
+refreshed from the same events, so it cannot sit stale next to a correct kantainer line. The
+answered-on-its-port statement refreshes on its own schedule and says when it last looked.
 
 This display exists only on a machine that is running its own image. During installation and
-during the window in which the machine downloads that image, the screen is whatever stock
-Fedora CoreOS shows.
+during the window in which the machine downloads that image, the screen is whatever stock Fedora
+CoreOS shows.
 
-**Decision and constraint.** §req:success-criteria items 19, 20 and 21 and
-§req:quality-attributes' console visibility require this, and §req:priorities ranks it fourth
-because it takes the router out of the first-boot path — which matters most on exactly the
-networks the operator does not administer. It is read-only and cannot lock anyone out, which
-is why it ranks above the console password.
+**Decision and constraint.** §req:success-criteria items 19, 20 and 21 and §req:quality-attributes'
+console visibility require this, and §req:priorities ranks it fourth because it takes the router
+out of the first-boot path — which matters most on exactly the networks the operator does not
+administer. It is read-only and cannot lock anyone out, which is why it ranks above the console
+password.
 
-The display extends the platform's existing console message machinery rather than replacing
-it. That machinery is already in the base image, already enumerates network interfaces,
-already redraws the login prompt the instant a cable goes up or down, and already survives
-updates as part of the platform. Writing a display of our own would reproduce all of it in
-order to add three lines.
+The display extends the platform's existing console message machinery rather than replacing it.
+That machinery is already in the base image, already enumerates network interfaces, already
+redraws the login prompt the instant a cable goes up or down, and already survives updates as part
+of the platform. Writing a display of our own would reproduce all of it in order to add a handful
+of lines.
 
 The operator chose to keep the platform's own per-interface line and add the kantainer block
-beneath it, so that the platform's part keeps working if ours breaks. For the cheapest safety
-in the project, degrading is the right failure mode: a screen that shows an address in the
-platform's shape is worth more than a blank one.
+beneath it, so that the platform's part keeps working if ours breaks. For the cheapest safety in
+the project, degrading is the right failure mode: a screen that shows an address in the platform's
+shape is worth more than a blank one.
 
-Portainer is reported twice, at the operator's direction, because an operator is at the
-keyboard precisely when the web page did not load — the one case where a container that
-started and then wedged reads as running. A screen that agreed with the machine rather than
-with the operator would be wrong exactly when it is being read.
+Portainer is reported twice, at the operator's direction, because an operator is at the keyboard
+precisely when the web page did not load — the one case where a container that started and then
+wedged reads as running. A screen that agreed with the machine rather than with the operator would
+be wrong exactly when it is being read. The two statements are also kept independent of each
+other: a Portainer event never invalidates the recorded port answer, because discarding one
+statement on the other's evidence is choosing between them by another route.
 
-Nothing here may be on the zero-touch path. §req:constraints says the machine has a screen
-and a keyboard only when the operator attaches them, so the block is produced whether or not
-anything is displaying it, and nothing waits for a display, a login, or a person.
+The service manager's verdict is reprinted in systemd's own words rather than translated. A
+mapping into friendlier terms is this repository's copy of systemd's judgement, and it is the copy
+that goes stale when a state is added; it would also disagree in wording with the `systemctl
+status` the operator runs next.
+
+The port statement is a completed HTTPS request, not a TCP connect, and it is made from the
+machine itself. A connect would report a wedged TLS listener as serving, which is the exact fault
+the statement exists to catch. Asking over the loopback keeps the statement honest on a machine
+with no address at all; the cost is that it reports that Portainer is serving, not that any
+particular network path to it is open.
 
 **Alternatives rejected.** Replacing the platform's per-interface line with a single
-kantainer-authored block was offered and rejected by the operator: it reads better, but it
-makes the whole screen ours to break, and a fault in it leaves nothing where the platform
-would still have shown an address. Removing the SSH host key fingerprints the platform prints
-was rejected with it — they are the only way to verify this host on a first SSH connection.
-Reporting Portainer from the service manager alone was rejected as agreeing with the machine
-in the one case that brings an operator to the keyboard; probing the port alone was rejected
-as unable to tell a stopped Portainer from a wedged one. Carrying the display through the
-install and download window was rejected as scope beyond the requirement; docs/verify.md
-already explains that window in prose (§spec:operator-documentation). A status dashboard or a
-custom program on the console was rejected outright: §req:quality-attributes promises the
-console is ordinary, with no menu and no recovery tool.
+kantainer-authored block was offered and rejected by the operator: it reads better, but it makes
+the whole screen ours to break, and a fault in it leaves nothing where the platform would still
+have shown an address. Removing the SSH host key fingerprints the platform prints was rejected
+with it — they are the only way to verify this host on a first SSH connection. Reporting Portainer
+from the service manager alone was rejected as agreeing with the machine in the one case that
+brings an operator to the keyboard; probing the port alone was rejected as unable to tell a
+stopped Portainer from a wedged one. Reporting a not-yet-checked port as unanswered was rejected
+as putting a disagreement on the screen that nothing had established, during the early boot when
+someone is most likely to be reading it. Carrying the display through the install and download
+window was rejected as scope beyond the requirement; docs/verify.md already explains that window
+in prose (§spec:operator-documentation). A status dashboard or a custom program on the console was
+rejected outright: §req:quality-attributes promises the console is ordinary, with no menu and no
+recovery tool.
 
-**Tradeoffs.** The address appears twice on the screen in two different shapes, and on a
-machine whose interface came up without an address the platform's line may sit above the
-kantainer block with nothing after it. Both are the accepted cost of not owning the platform's
-part. Something knocks on Portainer's port on a schedule for the life of the machine, so the
-screen lags reality by up to that interval — which is why it says when it last looked. The
-block's position on the screen depends on the platform's own snippets, so a change there moves
-ours. Anyone standing at the machine learns its address and that Portainer is running; that
-requires physical presence, the address is not a secret to anyone already on that network, and
-the Portainer password remains the whole of the defence (§spec:portainer-service).
+**Tradeoffs.** The address appears twice on the screen in two different shapes, and on a machine
+whose interface came up without an address the platform's line may sit above the kantainer block
+with nothing after it. Both are the accepted cost of not owning the platform's part. Something
+knocks on Portainer's port on a schedule for the life of the machine, so that statement lags
+reality by up to that interval — which is why it says when it last looked, and why a screen read
+seconds after a restart can show the two statements disagreeing while the port statement catches
+up. The block's position on the screen depends on the platform's own snippets, so a change there
+moves ours. Anyone standing at the machine learns its address and whether Portainer is serving;
+that requires physical presence, the address is not a secret to anyone already on that network,
+and the Portainer password remains the whole of the defence (§spec:portainer-service).
 
 Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:priorities,
 §req:constraints.
