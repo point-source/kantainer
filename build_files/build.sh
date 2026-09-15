@@ -265,6 +265,15 @@ test -L /etc/systemd/system/ostree-finalize-staged.service.requires/greenboot-se
 # and nothing anywhere saying so.
 test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
 
+# NetworkManager does the same thing with a dispatcher script whose mode is
+# wrong: it skips it silently. The machine would boot, write the block once, and
+# then never update it again - and the screen would look right to anyone who did
+# not move the machine to another network. systemd would at least fail the unit
+# if the generator were not executable, but neither failure is one the build log
+# would otherwise show.
+test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
+test -x /usr/libexec/kantainer/console-network-snippet
+
 ### 4. Cleanup
 #
 # uCore's own cleanup does not run for this layer, and `dnf5 clean all` leaves

@@ -257,6 +257,87 @@ SSIDS=()
 shows "a connected interface with no usable address says so in words" \
     "no network address"
 
+### The block keeps up with the machine
+
+# §req:success-criteria 21 is about events, not about a boot snapshot. These run
+# the dispatcher the way NetworkManager runs it, with a stubbed systemctl, and
+# read back what it asked for.
+DISPATCHER="${SYSTEM_FILES}/usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network"
+STUB="$(mktemp -d)"
+trap 'rm -rf "${STUB}"' EXIT
+
+cat > "${STUB}/systemctl" <<'STUBEOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "${SYSTEMCTL_LOG}"
+STUBEOF
+chmod +x "${STUB}/systemctl"
+
+# dispatched <name> <interface> <action> - what the dispatcher asked systemctl
+# for, or the empty string if it asked for nothing.
+dispatched() {
+    local interface="$1" action="$2" log
+    log="$(mktemp)"
+    SYSTEMCTL_LOG="${log}" PATH="${STUB}:${PATH}" \
+        "${DISPATCHER}" "${interface}" "${action}" > /dev/null 2>&1 || true
+    cat "${log}"
+    rm -f "${log}"
+}
+
+for action in up down dhcp4-change dhcp6-change; do
+    # restart rather than start: systemd satisfies a start request with a job
+    # that is already queued, so a burst of events could drop the last one -
+    # which is the one that describes where the machine actually ended up.
+    assert "a ${action} event rewrites the block" \
+        grep -qE 'restart .*kantainer-console-network\.service' \
+        <(dispatched ens18 "${action}")
+
+    # NetworkManager waits for a dispatcher script to finish. The generator
+    # talks to NetworkManager, so running it inline would be NetworkManager
+    # waiting on a script waiting on NetworkManager.
+    assert "a ${action} event does not block NetworkManager's dispatcher" \
+        grep -qF -- '--no-block' <(dispatched ens18 "${action}")
+done
+
+assert "an event the block does not depend on is ignored" \
+    test -z "$(dispatched ens18 connectivity-change)"
+
+# The whole design of the block's currency rests on this call: the platform's
+# own per-interface line is an agetty escape, so the reload re-expands it from
+# the same event and it cannot sit stale beside a correct kantainer line. Lose
+# the call and both lines silently freeze at their boot values.
+assert "rewriting the block redraws the login prompt" \
+    grep -qF 'agetty --reload' <(code "${GENERATOR}")
+
+# A deadlock here would hang NetworkManager's dispatcher queue, not just this
+# display.
+refute_nmcli() {
+    if grep -qE '(^|[^_])nmcli' <(code "${DISPATCHER}"); then
+        not_ok "the dispatcher does not call nmcli itself"
+    else
+        ok "the dispatcher does not call nmcli itself"
+    fi
+}
+refute_nmcli
+
+### Nothing on this path waits for a monitor
+
+# §req:constraints: the machine has a screen and a keyboard only when the
+# operator attaches them. The block is produced either way, so a unit that
+# ordered itself against a getty, or read from a tty, would make the zero-touch
+# path depend on hardware that is usually not there.
+UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-console-network.service"
+
+assert "the unit runs on an ordinary multi-user boot" \
+    grep -qF 'WantedBy=multi-user.target' "${UNIT}"
+
+for waits_for_a_person in 'StandardInput=' 'TTYPath=' 'getty' 'graphical.target'; do
+    if grep -qF "${waits_for_a_person}" <(code "${UNIT}"); then
+        not_ok "the unit does not wait for a display (found: ${waits_for_a_person})"
+    else
+        ok "the unit does not wait for a display (${waits_for_a_person})"
+    fi
+done
+
 ### What the image ships, rather than what the renderer produces
 
 # agetty version-sorts /etc/issue.d. The base image writes 21_clhm_*, 22_clhm_*
