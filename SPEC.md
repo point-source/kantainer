@@ -679,9 +679,8 @@ be able to do it: it put a readable secret on a physical object that leaves the 
 purely so the machine could scramble it later. Making `just render` emit the hash was rejected
 because a random salt breaks the byte comparison §spec:operator-host-support rests on. Making the
 console password required was rejected by §req:constraints, which makes blank a supported choice.
-Requiring the
-password for privileged commands was rejected because it breaks administration on every machine
-that does not set one. Logging the console in automatically, with no password, was rejected as
+Requiring the password for privileged commands was rejected because it breaks administration on
+every machine that does not set one. Logging the console in automatically, with no password, was rejected as
 strictly worse than today: it hands the machine to whoever walks up to it. A separate recovery
 account was rejected as a second identity to reason about and lock down, for no capability the
 operator's own account lacks.
@@ -696,9 +695,8 @@ here. Setting a console password means the machine can be taken over by someone 
 access and that password; leaving it blank means a machine whose network has failed can only be
 reflashed. The check states that choice at the moment it is made. Changing the password later
 means rendering and reflashing, like every other value in the file. One thing to confirm on the
-first hardware run, because
-nothing in this repository can answer it: whether the installer leaves the delivered machine
-configuration readable in the installed machine's boot partition. It already carries the
+first hardware run, because nothing in this repository can answer it: whether the installer leaves
+the delivered machine configuration readable in the installed machine's boot partition. It already carries the
 Portainer password, so the answer does not change this design, but it is the kind of fact this
 repository records rather than assumes.
 
