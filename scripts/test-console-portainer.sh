@@ -31,9 +31,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEM_FILES="${REPO_ROOT}/system_files"
 
 PROBE="${SYSTEM_FILES}/usr/libexec/kantainer/portainer-probe"
+GENERATOR="${SYSTEM_FILES}/usr/libexec/kantainer/console-portainer-snippet"
 
 # shellcheck source=/dev/null
 . "${PROBE}"
+# shellcheck source=/dev/null
+. "${GENERATOR}"
 
 failures=0
 
@@ -207,6 +210,230 @@ assert "the build enables the timer that keeps the answer current" \
 assert "the probe has somewhere to record its answer on every boot" \
     grep -qE '^d[[:space:]]+/run/kantainer[[:space:]]+0700[[:space:]]+root[[:space:]]+root[[:space:]]' \
     "${SYSTEM_FILES}/usr/lib/tmpfiles.d/kantainer.conf"
+
+### The two statements on the screen
+
+# Only the service manager is stubbed. The probe's answer is read from a REAL
+# file at STATE_FILE, written the way the probe writes it - so the parser under
+# test is the parser that runs on the machine, and the end-to-end check below
+# needs no second arrangement.
+SERVICE_STATE=active
+kantainer_systemctl() {
+    printf '%s\n' "${SERVICE_STATE}"
+    # systemctl is-active exits non-zero for everything but active, and prints
+    # the state either way. A renderer that read the exit status instead of the
+    # word would report every stopped Portainer as unknown.
+    [[ "${SERVICE_STATE}" == active ]]
+}
+
+# probed <yes|no> - the answer the probe last recorded, at a fixed time so the
+# assertions can name it.
+CHECKED='2026-09-15 14:03:11+01:00'
+probed() {
+    printf 'ANSWERED=%s\nCHECKED_AT=%s\n' "$1" "${CHECKED}" > "${STATE_FILE}"
+}
+
+block() { kantainer_portainer_block; }
+
+# shows <name> <text...> - every argument must appear in the block
+shows() {
+    local name="$1" rendered
+    shift
+    rendered="$(block)"
+    local want
+    for want in "$@"; do
+        if [[ "${rendered}" != *"${want}"* ]]; then
+            not_ok "${name} (missing: ${want})"
+            return
+        fi
+    done
+    ok "${name}"
+}
+
+# hides <name> <text...> - no argument may appear in the block
+hides() {
+    local name="$1" rendered
+    shift
+    rendered="$(block)"
+    local unwanted
+    for unwanted in "$@"; do
+        if [[ "${rendered}" == *"${unwanted}"* ]]; then
+            not_ok "${name} (present: ${unwanted})"
+            return
+        fi
+    done
+    ok "${name}"
+}
+
+# says_both <name> - the invariant under every fixture below. Two statements,
+# always, agreeing or not. This is the check a "simplification" into one verdict
+# has to get past.
+says_both() {
+    shows "$1" 'Portainer service:' "Portainer port ${PORTAINER_PORT}:"
+    assert "$1 - and nothing else" test "$(block | wc -l)" = 2
+}
+
+# 1. Both agree it is there.
+SERVICE_STATE=active
+probed yes
+says_both "a healthy machine still makes two statements"
+shows "a healthy machine says the service manager is happy" 'Portainer service: active'
+shows "a healthy machine says the port answered, and when it was asked" \
+    "Portainer port ${PORTAINER_PORT}: answering" "${CHECKED}"
+
+# 2. THE CASE THIS BATCH EXISTS FOR. The service manager is happy and the page
+# does not load: a container that started and then wedged. A screen that
+# resolved this to one verdict would agree with the machine and disagree with
+# the operator, who is standing there BECAUSE it did not load.
+SERVICE_STATE=active
+probed no
+says_both "a wedged Portainer is reported as a disagreement, not a verdict"
+shows "a wedged Portainer still reports the service manager verbatim" \
+    'Portainer service: active'
+shows "a wedged Portainer reports the port honestly against it" \
+    "Portainer port ${PORTAINER_PORT}: no answer" "${CHECKED}"
+
+# 3. Both agree it is stopped.
+SERVICE_STATE=inactive
+probed no
+says_both "a stopped Portainer still makes two statements"
+shows "a stopped Portainer is reported by both" \
+    'Portainer service: inactive' "Portainer port ${PORTAINER_PORT}: no answer"
+
+# 4. The other disagreement: the unit gave up, something is still serving the
+# port. Reporting the service manager alone would say Portainer is gone while
+# the operator's browser is looking at it.
+SERVICE_STATE=failed
+probed yes
+says_both "a failed unit whose port answers is reported as a disagreement"
+shows "a failed unit is reported verbatim, not translated into stopped" \
+    'Portainer service: failed'
+shows "a port that answers is reported even when the unit failed" \
+    "Portainer port ${PORTAINER_PORT}: answering"
+
+### Before the first probe lands
+
+# The timer's first run is seconds into the boot, and the renderer runs before
+# it. "no answer" here would put a disagreement on the screen that nothing has
+# established - during early boot, which is when someone is most likely to be
+# reading it.
+SERVICE_STATE=activating
+rm -f "${STATE_FILE}"
+says_both "a boot before the first probe still makes two statements"
+shows "an unasked port says it has not been asked" \
+    "Portainer port ${PORTAINER_PORT}: not checked yet"
+hides "an unasked port is never reported as refusing" 'no answer'
+
+# An answer with no time attached cannot be presented as current, because the
+# whole point of the second statement is how old it is.
+printf 'ANSWERED=yes\n' > "${STATE_FILE}"
+shows "an answer with no time behind it is not presented as current" \
+    "Portainer port ${PORTAINER_PORT}: not checked yet"
+
+# systemd is the machine's own verdict (Â§spec:console-display says "what the
+# machine's service manager says about it"), so nothing here re-derives it from
+# unit properties or the journal. What it cannot answer at all is said plainly
+# rather than guessed.
+SERVICE_STATE=""
+probed yes
+shows "a service manager that says nothing is not guessed at" 'Portainer service: unknown'
+
+### The renderer reads the probe, and the probe writes what the renderer reads
+
+# Â§spec:console-display item 5: run the probe the way the timer would, and the
+# block reflects it on the next read - no reboot, no login. The REAL writer
+# against the REAL parser, over one file.
+SERVICE_STATE=active
+ANSWERS=yes
+kantainer_probe_once
+shows "a probe that was answered reaches the screen on the next read" \
+    "Portainer port ${PORTAINER_PORT}: answering"
+
+BEFORE="$(block)"
+ANSWERS=no
+kantainer_probe_once
+shows "a probe that was refused reaches the screen on the next read" \
+    "Portainer port ${PORTAINER_PORT}: no answer"
+refute "the port statement moves when the answer moves" \
+    test "$(block)" = "${BEFORE}"
+
+### What the image ships, rather than what the renderer produces
+
+SNIPPET_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-console-portainer.service"
+NETWORK_GENERATOR="${SYSTEM_FILES}/usr/libexec/kantainer/console-network-snippet"
+
+# Beneath the platform's own output AND beneath batch 2's address lines. agetty
+# version-sorts /etc/issue.d, so this is decidable here: read both filenames out
+# of the two generators and sort them.
+network_snippet="$(sed -n 's/^SNIPPET_NAME=//p' <(code "${NETWORK_GENERATOR}"))"
+portainer_snippet="$(sed -n 's/^SNIPPET_NAME=//p' <(code "${GENERATOR}"))"
+
+assert "the Portainer block sorts below batch 2's address block" \
+    test "$(printf '%s\n%s\n' "${portainer_snippet}" "${network_snippet}" | sort -V | head -1)" \
+    = "${network_snippet}"
+
+# 30_ is the highest prefix the base image and Fedora CoreOS write. A lower one
+# would interleave these lines with Ignition's instead of following them.
+assert "the Portainer block sorts below every snippet the base image writes" \
+    grep -qE '^SNIPPET_NAME=9[0-9]_kantainer_' <(code "${GENERATOR}")
+
+# Lose this and the block is written correctly and never drawn: the login prompt
+# keeps whatever was on it when the machine booted.
+assert "rewriting the block redraws the login prompt" \
+    grep -qF 'agetty --reload' <(code "${GENERATOR}")
+
+# The platform stages the file under /run, renames it into place and relabels
+# it. Writing the snippet ourselves would put a half-written block on the screen
+# and reproduce machinery the base image maintains.
+assert "the block is written through the platform's own atomic writer" \
+    grep -qF 'write_via_tempfile' <(code "${GENERATOR}")
+
+### Nothing on this path waits for a monitor
+
+# Â§req:constraints: the machine has a screen and a keyboard only when the
+# operator attaches them. The block is produced either way.
+assert "the renderer runs on an ordinary multi-user boot" \
+    grep -qF 'WantedBy=multi-user.target' "${SNIPPET_UNIT}"
+
+for waits_for_a_person in 'StandardInput=' 'TTYPath=' 'getty' 'graphical.target'; do
+    refute "the renderer does not wait for a display (${waits_for_a_person})" \
+        grep -qF "${waits_for_a_person}" <(code "${SNIPPET_UNIT}")
+done
+
+# The renderer is restarted by the probe every minute and by Portainer on every
+# start and stop. Portainer restarts three times in a minute before giving up,
+# so systemd's default five-starts-in-ten-seconds is reachable - and a renderer
+# parked in "failed" freezes the screen at a wrong value with nothing to surface
+# it, because greenboot's default checks are deliberately not installed.
+assert "a restarting Portainer cannot rate-limit the block into staleness" \
+    grep -qE '^StartLimitIntervalSec=0' "${SNIPPET_UNIT}"
+
+### Portainer starting, stopping or failing reaches the screen
+
+# Â§spec:console-display: "Portainer starting, stopping or failing are all
+# reflected on the screen without a reboot and without anyone logging in". The
+# probe timer alone would get there within a minute; the operator who just
+# restarted Portainer is watching now.
+DROPIN="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-portainer.service.d/10-console.conf"
+
+for event in ExecStartPost ExecStopPost; do
+    assert "Portainer ${event} redraws the screen" \
+        grep -qE "^${event}=.*kantainer-console-portainer\.service" "${DROPIN}"
+done
+
+assert "a Portainer that fails redraws the screen" \
+    grep -qE '^OnFailure=kantainer-console-portainer\.service' "${DROPIN}"
+
+# The redraw must never be able to fail Portainer or hold up its start. The `-`
+# prefix makes systemd ignore the result; --no-block makes it not wait.
+assert "the redraw cannot fail Portainer" \
+    grep -qE '^Exec(Start|Stop)Post=-' "${DROPIN}"
+assert "the redraw cannot delay Portainer" \
+    grep -qF -- '--no-block' "${DROPIN}"
+
+assert "the build enables the renderer" \
+    grep -qF 'systemctl enable kantainer-console-portainer.service' \
+    <(code "${REPO_ROOT}/build_files/build.sh")
 
 echo
 if [[ "${failures}" -eq 0 ]]; then

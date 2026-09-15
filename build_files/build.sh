@@ -261,6 +261,11 @@ systemctl enable kantainer-console-network.service
 # redraws the screen afterwards.
 systemctl enable kantainer-portainer-probe.timer
 
+# The renderer also runs at boot, so the block is on the screen before the first
+# probe lands - saying the port has not been checked yet rather than saying
+# nothing. Afterwards it is restarted by the probe and by Portainer's own drop-in.
+systemctl enable kantainer-console-portainer.service
+
 # The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
 # no exit status above reports it. If greenboot ever dropped that line, the
 # enable would still succeed and the machine would run the health check, report
@@ -281,6 +286,7 @@ test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
 test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
 test -x /usr/libexec/kantainer/console-network-snippet
 test -x /usr/libexec/kantainer/portainer-probe
+test -x /usr/libexec/kantainer/console-portainer-snippet
 
 # curl is what makes the port statement a statement about HTTPS rather than
 # about a TCP connect (SPEC.md §spec:console-display). It comes from the base

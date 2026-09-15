@@ -1,0 +1,30 @@
+[Unit]
+Description=Show what is known about Portainer on the login screen
+Documentation=https://github.com/point-source/kantainer
+
+# Deliberately NOT After=/Requires=kantainer-portainer.service. This block's job
+# is to report on a Portainer that may be stopped or failed, and a renderer
+# ordered behind it could only run once the thing it reports on was already up.
+
+# The probe restarts this every minute, and Portainer's drop-in restarts it on
+# every start and stop. Portainer retries three times in a minute before giving
+# up, so systemd's default five-starts-in-ten-seconds is reachable in a crash
+# loop - and the sixth would be refused, parking this unit in "failed" with the
+# screen frozen at whatever the last successful run wrote. Nothing would surface
+# that: greenboot's default checks are deliberately not installed, so a failed
+# unit does not fail the boot.
+#
+# Rate-limiting the one thing that keeps the display honest protects nothing.
+# The work is one systemctl call, one small read and an atomic write.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+
+# No RemainAfterExit=yes: this is re-run on every probe and every Portainer
+# state change, and a unit left "active (exited)" would report the wrong thing
+# about work that repeats.
+ExecStart=/usr/libexec/kantainer/console-portainer-snippet
+
+[Install]
+WantedBy=multi-user.target
