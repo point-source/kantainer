@@ -82,19 +82,20 @@ fill() {
     local remaining="$1"
     shift
 
-    local -a placeholders=() replacements=()
+    local -a placeholders replacements
     local placeholder matched rendered=""
-    local i
+    local i pair_count=0
 
     while [[ "$#" -gt 0 ]]; do
-        placeholders[${#placeholders[@]}]="$1"
-        replacements[${#replacements[@]}]="$2"
+        pair_count=$(( pair_count + 1 ))
+        placeholders[pair_count]="$1"
+        replacements[pair_count]="$2"
         shift 2
     done
 
     while [[ -n "${remaining}" ]]; do
         matched=""
-        for ((i = 0; i < ${#placeholders[@]}; i++)); do
+        for ((i = 1; i <= pair_count; i++)); do
             placeholder="${placeholders[${i}]}"
             if [[ "${remaining}" == "${placeholder}"* ]]; then
                 rendered="${rendered}${replacements[${i}]}"

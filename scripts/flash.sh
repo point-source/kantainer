@@ -83,16 +83,15 @@ kantainer_select_runtime() {
 
 kantainer_personalize_installer() {
     local runtime="$1" iso="$2" staging="$3"
-    local -a runtime_options
 
+    set -- run --rm
     case "${runtime}" in
-        docker) runtime_options=() ;;
-        podman) runtime_options=(--security-opt label=disable) ;;
+        docker) ;;
+        podman) set -- "$@" --security-opt label=disable ;;
         *) return 2 ;;
     esac
 
-    "${runtime}" run --rm \
-        "${runtime_options[@]}" \
+    set -- "$@" \
         --volume "$(dirname "${iso}"):/iso:ro" \
         --volume "${staging}:/out:rw" \
         "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
@@ -100,6 +99,7 @@ kantainer_personalize_installer() {
         --live-ignition /out/installer.ign \
         --output "/out/installer.iso" \
         "/iso/$(basename "${iso}")"
+    "${runtime}" "$@"
 }
 
 kantainer_build_installer() {
