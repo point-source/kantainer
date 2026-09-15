@@ -34,9 +34,10 @@
 # that guessed wrong would fail closed to an empty screen.
 #
 # The Portainer half of §spec:console-display - what the service manager says
-# about Portainer and whether its port actually answered - is batch 3. It gets
-# its own snippet at 91_kantainer_portainer.issue, directly below this one, and
-# its own unit. Nothing in this file needs to change for it.
+# about Portainer and whether its port actually answered - is
+# console-portainer-snippet, with its own unit and its own snippet at
+# 91_kantainer_portainer.issue, directly below this one. The two blocks read as
+# one on the screen and share nothing else.
 #
 # Arguments exist for the tests, which source this file and replace
 # kantainer_nmcli. The unit passes none, and main() runs only when the file is
