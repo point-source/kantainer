@@ -455,6 +455,19 @@ Portainer's interface and knows the password owns the machine; the password's st
 the whole of the defence, which is why §spec:machine-configuration enforces a minimum
 length.
 
+The administrator password is delivered readable and stays readable on the machine, unlike the
+console password, which is converted before the installer media is written
+(§spec:console-password). Portainer is handed the password itself rather than a stored form of
+it, and neither the container the flash command runs nor the machine's own image can produce the
+form Portainer would accept instead. The operator chose to accept that rather than hold the
+feature, and the mitigation is documentation: §spec:operator-documentation tells the operator to
+change the password in Portainer once they are logged in, which is also the moment they are first
+looking at it. Portainer ignores the delivered password once an administrator exists - verified
+against the pinned image, which logs that it is skipping the password flags - so the change
+survives restarts and operating system updates, and the delivered copy stops being a way in
+rather than being deleted. The stick is a secret-bearing object either way, which
+§spec:installer-media already says.
+
 Cites §req:sc:portainer-in-a-browser, §req:sc:portainer-login-without-watching,
 §req:sc:containers-survive-reboot, §req:sc:data-survives-updates, §req:constraints,
 §req:quality-attributes.
@@ -701,17 +714,18 @@ identity to reason about and lock down, for no capability the operator's own acc
 **Tradeoffs.** The stick carries the console password as a `$6$` hash rather than in readable
 form. That is much better and it is not safe: whoever picks the stick up can attack that hash
 offline, at their own pace, and the twelve-character floor is the whole of what stands behind
-it. The asymmetry is deliberate and not yet resolved — the Portainer password is still readable
-both on the stick and on the installed machine, because neither the container nor the machine's
-own image can produce the form that service needs. That is a separate piece of work, not an
-oversight here. Setting a console password means the machine can be taken over by someone with
-physical access and that password; leaving it blank means a machine whose network has failed
-can only be reflashed. The check states that choice at the moment it is made. Changing the
-password later means rendering and reflashing, like every other value in the file. One thing to
-confirm on the first hardware run, because nothing in this repository can answer it: whether
-the installer leaves the delivered machine configuration readable in the installed machine's
-boot partition. It already carries the Portainer password, so the answer does not change this
-design, but it is the kind of fact this repository records rather than assumes.
+it. The asymmetry with the Portainer password is deliberate and settled: that one stays
+readable on the stick and on the machine, because Portainer is handed the password itself and
+nothing available here can produce the form it would take instead. The operator accepted it and
+the answer is documentation rather than code — see §spec:portainer-service. Setting a console
+password means the machine can be taken over by someone with physical access and that password;
+leaving it blank means a machine whose network has failed can only be reflashed. The check
+states that choice at the moment it is made. Changing the password later means rendering and
+reflashing, like every other value in the file. One thing to confirm on the first hardware run,
+because nothing in this repository can answer it: whether the installer leaves the delivered
+machine configuration readable in the installed machine's boot partition. It already carries
+the Portainer password, so the answer does not change this design, but it is the kind of fact
+this repository records rather than assumes.
 
 Cites §req:sc:console-login, §req:sc:console-password-never-remote,
 §req:sc:blank-console-password-accepted, §req:sc:console-password-floor, §req:constraints,

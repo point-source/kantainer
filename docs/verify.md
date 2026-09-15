@@ -159,6 +159,27 @@ about. The administrator account is created from the password in your configurat
 After logging in you land on a working dashboard with the machine's own Docker engine already
 connected. There is no environment to add.
 
+## Change the Portainer password now
+
+**Your Portainer password is readable on the USB stick, and readable on the machine.** It has to
+be: Portainer is handed the password itself, not a scrambled form of it, so the machine keeps a
+copy at `/etc/kantainer/portainer-admin-password` and hands it to Portainer at every start. The
+console password is not like this — that one is scrambled before the stick is written — but the
+Portainer password is, and Portainer's administrator is how someone reaches every container you
+run.
+
+So change it here, once, while you are already logged in: **your account menu → My account →
+change password.** Then the password that gets you in is one that was never on the stick and is
+not in a file on the machine.
+
+Portainer will not undo it. Once an administrator exists, Portainer ignores the delivered
+password entirely and says so in its log — "instance already has an administrator user defined,
+skipping admin password related flags". Your new password survives restarts and operating system
+updates. Only reflashing the machine starts over, and that builds a new Portainer anyway.
+
+The file stays where it is; it just stops being the way in. Treat the stick as carrying a secret
+regardless, and keep it somewhere you would keep a key.
+
 ## Optional: confirm the machine will keep itself updated
 
 **Skip this if you like — nothing here needs it, and the machine works either way.** It is worth

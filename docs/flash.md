@@ -79,6 +79,11 @@ ignored line would mean the value you meant to set never arrives, and nothing wo
   administrator before the web interface accepts its first connection, which also closes the
   window where an unclaimed administration page sits on the network.
 
+  **Unlike the console password below, this one is not scrambled.** Portainer has to be handed
+  the password itself, so it travels readable on the stick and stays readable on the machine at
+  `/etc/kantainer/portainer-admin-password`. Change it in Portainer once you are logged in —
+  `docs/verify.md` has the step, and Portainer ignores the delivered password from then on.
+
 **Optional:**
 
 - `KANTAINER_CONSOLE_PASSWORD` — the password for logging in at the machine's **own keyboard**,
