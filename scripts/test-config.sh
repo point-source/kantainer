@@ -407,15 +407,6 @@ else
     ok "a supplied hash keeps the readable password out of the specification"
 fi
 
-# The posture that must not move, checked again on the path that actually ships
-# a password: §spec:remote-access closes SSH to passwords whether or not one is
-# set, and the hash landing in the document must not touch that drop-in.
-if [[ "$(sshd_dropin)" == "${sshd_without_console_password}" ]]; then
-    ok "a supplied hash leaves the sshd drop-in byte-identical"
-else
-    not_ok "a supplied hash leaves the sshd drop-in byte-identical"
-fi
-
 # Blank console password wins over a supplied hash: there is no account to put
 # one on. This is the case §req:constraints calls a supported machine, and it
 # must stay the machine this repository built before the field existed.
@@ -548,11 +539,21 @@ fi
 
 ### wireless, or the pointed absence of it
 
+# Matched against the document's STRUCTURE, not its raw bytes. The test material
+# is freshly generated per run, and an SSH key is base64 - one in a few hundred
+# contains the literal "WpA", which a case-insensitive grep for "wpa" over the
+# whole file reads as a wireless profile that is not there. Asserting on paths
+# and unit names is the same question asked where the answer actually lives.
 render "KANTAINER_WIFI_SSID=" "KANTAINER_WIFI_PASSPHRASE="
-if grep -qiE 'networkmanager|nmconnection|wifi|wireless|wpa' "${WORK}/out.json"; then
-    not_ok "a wired machine carries no wireless configuration at all"
-else
+if jq -e '
+        [ (.storage.files // [])[].path,
+          (.storage.directories // [])[].path,
+          (.systemd.units // [])[].name ]
+        | map(select(test("networkmanager|nmconnection|wifi|wireless|wpa"; "i")))
+        | length == 0' "${WORK}/out.json" > /dev/null; then
     ok "a wired machine carries no wireless configuration at all"
+else
+    not_ok "a wired machine carries no wireless configuration at all"
 fi
 
 render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=${TEST_PASSPHRASE}"

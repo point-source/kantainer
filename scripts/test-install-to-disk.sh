@@ -183,10 +183,10 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-# What scripts/render-ignition.sh produces for a machine with a console
-# password: the stored form already in place, because `just flash` made it on
-# the operator's host before the stick was written.
-locked_ignition() {
+# What the stick carries for a machine with a console password: the stored form
+# already in place, because `just flash` made it on the operator's host before
+# the stick was written.
+hashed_ignition() {
     jq -cn '{ignition:{version:"3.5.0"},
              passwd:{users:[{name:"operator", passwordHash:"$6$fixture$hash",
                              sshAuthorizedKeys:["ssh-ed25519 AAAA test"]}]}}'
@@ -203,7 +203,7 @@ locked_ignition() {
 #
 # coreos-installer and systemctl are replaced: nothing here may write to a disk
 # or reboot anything.
-locked_ignition > "${WORK}/main.ign"
+hashed_ignition > "${WORK}/main.ign"
 : > "${WORK}/main-target"
 
 if (
