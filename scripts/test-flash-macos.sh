@@ -201,7 +201,13 @@ printf '%s\n' \
 printf '%s\n' \
     '#!/bin/bash' \
     'printf "dd %s\n" "$*" >> "${FIXTURE_EVENT_LOG}"' \
-    '[[ -z "${FIXTURE_FAIL_WRITE-}" ]]' \
+    'input=""' \
+    'for arg in "$@"; do' \
+    '    case "${arg}" in if=*) input="${arg#if=}" ;; esac' \
+    'done' \
+    '[[ -n "${input}" ]] || exit 2' \
+    '[[ -z "${FIXTURE_FAIL_WRITE-}" ]] || exit 1' \
+    'cp "${input}" "${FIXTURE_WRITE_CAPTURE}"' \
     > "${BIN}/dd"
 
 printf '%s\n' \
@@ -214,11 +220,26 @@ chmod +x "${BIN}"/*
 
 EVENT_LOG="${WORK}/events.log"
 INFO_COUNT="${WORK}/info-count"
+WRITE_CAPTURE="${WORK}/written-installer.iso"
+ALIGNED_EXPECTED="${WORK}/aligned-installer.iso"
+UNALIGNED_EXPECTED="${WORK}/unaligned-installer.iso"
 FIXTURE_PATH="${BIN}:${PATH}"
 FIXTURE_DOCKER_FAIL=""
 FIXTURE_DOCKER_USABLE=""
+FIXTURE_FAIL_SYNC=""
+FIXTURE_FAIL_UNMOUNT=""
+FIXTURE_FAIL_WRITE=""
+FIXTURE_UNALIGNED=""
 FIXTURE_PODMAN_FAIL=""
 FIXTURE_PODMAN_USABLE="1"
+
+i=0
+while [[ "${i}" -lt 4096 ]]; do
+    printf x
+    i=$(( i + 1 ))
+done > "${ALIGNED_EXPECTED}"
+cp "${ALIGNED_EXPECTED}" "${UNALIGNED_EXPECTED}"
+printf y >> "${UNALIGNED_EXPECTED}"
 
 # fetch-installer's cache lives under the repository by design. Remove only
 # the exact fixture file this test creates, and leave a pre-existing cache
@@ -232,9 +253,13 @@ fi
 
 reset_fixture() {
     : > "${EVENT_LOG}"
-    rm -f "${INFO_COUNT}"
+    rm -f "${INFO_COUNT}" "${WRITE_CAPTURE}"
     FIXTURE_DOCKER_FAIL=""
     FIXTURE_DOCKER_USABLE=""
+    FIXTURE_FAIL_SYNC=""
+    FIXTURE_FAIL_UNMOUNT=""
+    FIXTURE_FAIL_WRITE=""
+    FIXTURE_UNALIGNED=""
     FIXTURE_PODMAN_FAIL=""
     FIXTURE_PODMAN_USABLE="1"
 }
@@ -251,9 +276,14 @@ run_fixture() {
             FIXTURE_DOCKER_FAIL="${FIXTURE_DOCKER_FAIL}" \
             FIXTURE_DOCKER_USABLE="${FIXTURE_DOCKER_USABLE}" \
             FIXTURE_EVENT_LOG="${EVENT_LOG}" \
+            FIXTURE_FAIL_SYNC="${FIXTURE_FAIL_SYNC}" \
+            FIXTURE_FAIL_UNMOUNT="${FIXTURE_FAIL_UNMOUNT}" \
+            FIXTURE_FAIL_WRITE="${FIXTURE_FAIL_WRITE}" \
             FIXTURE_INFO_COUNT="${INFO_COUNT}" \
             FIXTURE_PODMAN_FAIL="${FIXTURE_PODMAN_FAIL}" \
             FIXTURE_PODMAN_USABLE="${FIXTURE_PODMAN_USABLE}" \
+            FIXTURE_UNALIGNED="${FIXTURE_UNALIGNED}" \
+            FIXTURE_WRITE_CAPTURE="${WRITE_CAPTURE}" \
             TMPDIR="${WORK}" \
             just flash "${device}" "${WORK}/operator.conf"
     )
@@ -491,11 +521,77 @@ if run_fixture /dev/disk7 external $'/dev/disk7\n' > "${WORK}/success.out" 2> "$
     grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
     grep -q 'of=/dev/rdisk7' "${EVENT_LOG}" &&
     grep -q '^sync$' "${EVENT_LOG}" &&
+    cmp -s "${ALIGNED_EXPECTED}" "${WRITE_CAPTURE}" &&
     grep -qF 'Eject /dev/disk7 manually' "${WORK}/success.err"; then
-    ok "the real just flash path completes the ordinary macOS flow"
+    ok "the real just flash path writes every aligned byte through the raw device"
 else
-    not_ok "the real just flash path completes the ordinary macOS flow"
+    not_ok "the real just flash path writes every aligned byte through the raw device"
     cat "${WORK}/success.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_UNALIGNED="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/unaligned.out" 2> "${WORK}/unaligned.err" &&
+    grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
+    grep -q 'of=/dev/disk7' "${EVENT_LOG}" &&
+    ! grep -q 'of=/dev/rdisk7' "${EVENT_LOG}" &&
+    grep -q '^sync$' "${EVENT_LOG}" &&
+    cmp -s "${UNALIGNED_EXPECTED}" "${WRITE_CAPTURE}"; then
+    ok "the real just flash path writes every unaligned byte through the buffered device"
+else
+    not_ok "the real just flash path writes every unaligned byte through the buffered device"
+    cat "${WORK}/unaligned.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_FAIL_UNMOUNT="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/unmount-failure.out" 2> "${WORK}/unmount-failure.err"; then
+    not_ok "an unmount failure stops the real just flash path"
+elif grep -qF 'Nothing was written to /dev/disk7' "${WORK}/unmount-failure.err" &&
+    grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
+    ! grep -Eq '^dd |^sync$' "${EVENT_LOG}" &&
+    [[ ! -e "${WRITE_CAPTURE}" ]]; then
+    ok "an unmount failure stops before write and sync"
+else
+    not_ok "an unmount failure stops before write and sync"
+    cat "${WORK}/unmount-failure.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_FAIL_WRITE="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/write-failure.out" 2> "${WORK}/write-failure.err"; then
+    not_ok "a write failure stops the real just flash path"
+elif grep -qF 'The target may be incomplete' "${WORK}/write-failure.err" &&
+    grep -q '^dd ' "${EVENT_LOG}" &&
+    ! grep -q '^sync$' "${EVENT_LOG}" &&
+    ! grep -qF 'is ready' "${WORK}/write-failure.err"; then
+    ok "a write failure reports a possible partial target without syncing or succeeding"
+else
+    not_ok "a write failure reports a possible partial target without syncing or succeeding"
+    cat "${WORK}/write-failure.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_FAIL_SYNC="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/sync-failure.out" 2> "${WORK}/sync-failure.err"; then
+    not_ok "a sync failure stops the real just flash path"
+elif grep -qF 'The target may be incomplete' "${WORK}/sync-failure.err" &&
+    grep -q '^dd ' "${EVENT_LOG}" &&
+    grep -q '^sync$' "${EVENT_LOG}" &&
+    cmp -s "${ALIGNED_EXPECTED}" "${WRITE_CAPTURE}" &&
+    ! grep -qF 'is ready' "${WORK}/sync-failure.err"; then
+    ok "a sync failure follows a complete write without reporting success"
+else
+    not_ok "a sync failure follows a complete write without reporting success"
+    cat "${WORK}/sync-failure.err" >&2
     cat "${EVENT_LOG}" >&2
 fi
 

@@ -2,7 +2,7 @@
 # Focused host-portability check for the real operator commands
 # (SPEC.md §spec:operator-host-support).
 #
-# Usage: test-operator-config-compat.sh [artifact-directory]
+# Usage: test-operator-config-compat.sh [artifact-directory] [reference-directory]
 #
 # With an artifact directory, the deterministic input, outcome record and
 # rendered machine specification are retained for byte comparison with another
@@ -15,6 +15,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 ARTIFACTS="${1:-${WORK}/artifacts}"
+REFERENCE="${2-}"
 mkdir -p "${ARTIFACTS}"
 
 # Fixed public test material makes the config and rendered bytes identical on
@@ -95,6 +96,20 @@ printf '%s\n' \
     'config-check empty-first duplicate: refused' \
     'render empty-first duplicate: refused without output' \
     > "${ARTIFACTS}/outcomes.txt"
+
+if [[ -n "${REFERENCE}" ]]; then
+    for artifact in operator.conf outcomes.txt machine.ign; do
+        if [[ ! -f "${REFERENCE}/${artifact}" ]]; then
+            echo "NOT OK   - reference artifacts do not contain ${artifact}" >&2
+            exit 1
+        fi
+        if ! cmp -s "${REFERENCE}/${artifact}" "${ARTIFACTS}/${artifact}"; then
+            echo "NOT OK   - ${artifact} differs from the reference host" >&2
+            exit 1
+        fi
+    done
+    echo "ok       - configuration inputs, outcomes and rendered bytes match the reference host"
+fi
 
 echo
 echo "operator configuration commands are portable"

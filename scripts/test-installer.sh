@@ -18,6 +18,16 @@ set -oue pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FETCH="${REPO_ROOT}/scripts/fetch-installer.sh"
+CHECKSUM_ONLY=""
+
+case "${1-}" in
+    "") ;;
+    --checksum-only) CHECKSUM_ONLY="1" ;;
+    *)
+        echo "Usage: test-installer.sh [--checksum-only]" >&2
+        exit 2
+        ;;
+esac
 
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/scripts/ignition-lib.sh"
@@ -219,6 +229,17 @@ elif [[ ! -s "${WORK}/darwin-bad-download.out" &&
     ok "refuses and discards a corrupt macOS download"
 else
     not_ok "discards a corrupt macOS download without publishing a path"
+fi
+
+if [[ -n "${CHECKSUM_ONLY}" ]]; then
+    echo
+    if [[ "${failures}" -eq 0 ]]; then
+        echo "all installer checksum checks behave as intended"
+    else
+        echo "${failures} installer checksum check(s) misbehaved"
+        exit 1
+    fi
+    exit 0
 fi
 
 ### The installer media's own configuration
