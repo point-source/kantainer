@@ -1,0 +1,30 @@
+[Unit]
+Description=Ask Portainer's HTTPS port whether it answers, for the login screen
+Documentation=https://github.com/point-source/kantainer
+
+# Deliberately NOT After=/Requires=kantainer-portainer.service. The probe's
+# whole job is to report on a Portainer that may not be running, may have
+# failed, or may have started and wedged. Ordering against it would mean the one
+# statement that disagrees with the service manager could only run when the
+# service manager was already happy.
+
+# No [Install] section: this is started by kantainer-portainer-probe.timer and
+# by nothing else. Enabling the service instead of the timer would look right,
+# run the probe once at boot, and leave the screen frozen at that answer for the
+# life of the machine.
+
+[Service]
+Type=oneshot
+
+# No RemainAfterExit=yes, unlike this repository's other oneshot units. Those
+# run once per boot; this one runs every interval, and a unit left
+# "active (exited)" would report the wrong thing about work that repeats.
+ExecStart=/usr/libexec/kantainer/portainer-probe
+
+# An answer that never reaches the screen is not on the screen.
+#
+# `restart` rather than `start`, for the reason batch 2 recorded in its
+# NetworkManager dispatcher: systemd satisfies a start request with a job that
+# is already queued, so the newest answer - the current one - is the one that
+# gets dropped. --no-block so the probe does not sit waiting on the renderer.
+ExecStartPost=/usr/bin/systemctl restart --no-block kantainer-console-portainer.service

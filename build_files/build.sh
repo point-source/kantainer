@@ -254,6 +254,13 @@ systemctl enable kantainer-greenboot-grub.service
 # nothing about it waits for a monitor, a login, or a person.
 systemctl enable kantainer-console-network.service
 
+# The login screen's Portainer lines (SPEC.md §spec:console-display). THE TIMER
+# IS WHAT GETS ENABLED, not kantainer-portainer-probe.service: the service looks
+# once, and enabling it instead would freeze the port statement at whatever was
+# true thirty seconds into the boot. The probe's own ExecStartPost is what
+# redraws the screen afterwards.
+systemctl enable kantainer-portainer-probe.timer
+
 # The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
 # no exit status above reports it. If greenboot ever dropped that line, the
 # enable would still succeed and the machine would run the health check, report
@@ -273,6 +280,15 @@ test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
 # would otherwise show.
 test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
 test -x /usr/libexec/kantainer/console-network-snippet
+test -x /usr/libexec/kantainer/portainer-probe
+
+# curl is what makes the port statement a statement about HTTPS rather than
+# about a TCP connect (SPEC.md §spec:console-display). It comes from the base
+# image, and if it ever stopped coming the probe would not crash - it would
+# report a closed port on a perfectly healthy machine, which is the screen lying
+# in the one direction that sends an operator chasing a fault that is not there.
+# Nothing else here would notice. Fail the build instead, where it is decidable.
+test -x /usr/bin/curl
 
 ### 4. Cleanup
 #
