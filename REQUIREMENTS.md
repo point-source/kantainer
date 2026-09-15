@@ -18,6 +18,14 @@ not have, and flashing cannot identify or prepare a target disk. An operator who
 macOS therefore cannot reach the same flash, boot, and walk-away outcome without replacing
 parts of the documented workflow themselves.
 
+Two situations also leave the operator standing next to the machine with nothing to
+go on. Sometimes the machine is on the network, but the router's device list is
+unreadable or not the operator's to read — a guest network, a site somebody else
+administers — so the address cannot be looked up. Sometimes the machine got no address
+at all, and there is nothing to look up. The machine has a screen and a keyboard and
+uses neither: its login prompt says nothing, and no account has a password, so nobody
+can log in to find out why.
+
 The box does one job: run containers the operator deploys through Portainer. It is not
 a desktop, not a storage appliance, and not a dashboard platform. Its second job is to
 stay alive without attention — patching itself, and recovering on its own when a patch
@@ -73,7 +81,22 @@ goes wrong.
    or Podman. It prefers Docker when both are available, names a missing or failed runtime,
    and asks before retrying a failed Docker build with Podman. Declining the retry writes
    nothing.
-19. The macOS support check runs the actual configuration, rendering, and flash command
+19. With a monitor attached, the machine's login screen shows its network address, which
+    network it is on, and whether Portainer is serving. All of it is readable without
+    logging in.
+20. When the machine has no network address, that screen says so plainly rather than
+    showing an empty or stale address.
+21. The screen keeps up with the machine. Attaching a cable, joining a network, or a
+    changed address is reflected there without a reboot and without a login.
+22. An operator who set a console password in the configuration file can log in at the
+    machine's own keyboard with it, and run privileged commands with it.
+23. SSH refuses password logins for every account whether or not a console password is
+    set. The console password never reaches the network.
+24. Leaving the console password blank is accepted, and the configuration check says
+    plainly that such a machine cannot be reached at all once its network fails.
+25. A console password shorter than 12 characters is refused when the configuration is
+    checked — the same floor as the Portainer password.
+26. The macOS support check runs the actual configuration, rendering, and flash command
    paths under the built-in Bash in CI. It proves the accepted and refused device cases,
    ordering before destructive actions, runtime choices, unmount failure, complete writes,
    and sync using small fixtures rather than downloading or writing the full installer.
@@ -96,6 +119,23 @@ goes wrong.
 - As the operator, I open my router's device list, find the new machine's address, type
   it into a browser, and get Portainer's login page, so that I can start deploying
   containers minutes after first boot.
+- As the operator, I attach a monitor to the machine and read its address, its network,
+  and whether Portainer is up straight off the login screen, so that I do not need the
+  router at all.
+- As the operator on a network I do not administer, I get the address from the machine
+  itself, so that a guest network or somebody else's site does not stop me reaching
+  Portainer.
+- As the operator whose machine came up with no address, I read "no network address" on
+  that screen, so that I stop hunting for the machine on the network and start looking at
+  the machine.
+- As the operator, I plug the cable in and watch the address appear on the screen, so
+  that I can tell the machine joined the network without rebooting it.
+- As the operator, I set a console password in the configuration file, log in at the
+  machine's keyboard, and run privileged commands there, so that a broken network does
+  not lock me out of my own machine.
+- As the operator who left that password blank, I am told what I am giving up while I am
+  checking my configuration, so that it is a choice I made rather than one I discover
+  later with a keyboard in my hand.
 - As the operator, I deploy a container through Portainer's web interface and see it
   running, so that I know the host is doing its actual job.
 - As the operator, I set my Portainer admin password ahead of time in the configuration
@@ -164,6 +204,18 @@ deterministic fixtures, including values that have changed meaning across Bash r
 the failure paths that protect a device from writes. A 3 GB installer write and a physical
 USB boot are not release gates for macOS support.
 
+**Console visibility.** The login screen answers the two questions an operator standing
+at the machine has: what do I type into a browser, and is Portainer running. It answers
+them before anyone logs in, and it stays current as the network changes underneath it.
+
+**Local access as a fallback.** The console password exists for the case where the
+network does not work. It is optional and absent unless the operator sets it, and it
+never widens remote access — SSH stays key-only regardless.
+
+**Console login is ordinary.** Past the address display and the password, the console is
+whatever the base platform provides. The project promises no menu, no recovery tool, and
+no particular set of commands there.
+
 **Minimality.** No desktop environment. Nothing installed that is not needed to run
 containers, serve Portainer, and keep the machine patched.
 
@@ -198,8 +250,17 @@ Older BIOS-only machines, ARM boards, and GPU passthrough are out of scope.
   configuration file. The repository ships the template; the operator keeps their copy
   untracked. One command combines them onto the USB stick.
 - The configuration file is the only place machine-specific values live: the login
-  account, the SSH public key, optionally the target drive, and optionally the Portainer
-  admin password. Everything else belongs in the image.
+  account, the SSH public key, the Portainer admin password, optionally the target
+  drive, and optionally a console password for the login account. Everything else
+  belongs in the image.
+- The file now carries two secrets. Both keep the same 12-character floor and the same
+  rule about never entering this repository.
+- The console password grants keyboard login and privileged commands on the machine. It
+  grants no SSH access, ever.
+- A blank console password is a supported choice, not an error. The check warns; it does
+  not refuse.
+- The machine has a screen and a keyboard only when the operator attaches them. Nothing
+  in the zero-touch first-boot path may depend on either being present.
 - The image is built on uCore, from the Universal Blue custom image template.
 - Portainer ships inside the image. It is not installed after first boot.
 - The machine's network address is assigned automatically. The operator finds it from
@@ -239,10 +300,20 @@ can intentionally cross that boundary for an operator who needs direct device ac
 its extra opt-in and exact-path confirmation carry the safety decision instead of a guess
 by the command.
 
-**Fourth: a pre-set Portainer password.** Convenience that removes a timing trap. It has
+**Fourth: the machine says where it is.** Address, network, and Portainer state on the
+login screen. This takes the router out of the first-boot path, which matters most
+exactly where the operator has least control of it. It is read-only and cannot lock
+anyone out, so it is the cheapest safety this project can buy.
+
+**Fifth: a way in when the network is not.** The console password turns a dead network
+from a reflash into a look. It ranks below the display because it is insurance rather
+than daily use, and because it is off unless the operator asks for it — the default
+posture stays exactly as locked down as it is today.
+
+**Sixth: a pre-set Portainer password.** Convenience that removes a timing trap. It has
 a working fallback — restart and claim the account — so it can slip without blocking
 anything.
 
-**Fifth: documentation.** Rebuild, flash, verify. Small, but the repository is worth
+**Seventh: documentation.** Rebuild, flash, verify. Small, but the repository is worth
 little to a future reader without it, and it is written last because it describes what
 was actually built.
