@@ -10,8 +10,8 @@
 # The file is PARSED, not sourced. It carries a password, and sourcing it would
 # put the operator on the hook for shell-quoting exactly the characters a good
 # password contains: $ ` " ' \ and spaces. Instead every value is taken
-# literally — everything after the first `=` to the end of the line. This is the
-# shape os-release and systemd's EnvironmentFile already use.
+# literally — everything after the first `=` to the end of the line, with no
+# quoting or escape syntax.
 
 # The complete set of fields. A key outside this list is a refusal rather than a
 # silently ignored line: a misspelt field name is otherwise indistinguishable
@@ -57,8 +57,12 @@ kantainer_load_config() {
         printf -v "${field}" '%s' ''
     done
 
-    local -A seen=()
-    local lineno=0 line key value known
+    # Bash 3.2 has indexed arrays but not associative arrays. Keep presence
+    # separate from the loaded value: KEY= is still a first occurrence and a
+    # later value for that key must be refused.
+    local -a seen
+    local seen_count=0
+    local lineno=0 line key value known seen_field duplicate seen_index
     while IFS= read -r line || [[ -n "${line}" ]]; do
         lineno=$(( lineno + 1 ))
 
@@ -93,11 +97,20 @@ kantainer_load_config() {
     kantainer.conf.example lists every field this file may set."
         fi
 
-        if [[ -n "${seen[${key}]:-}" ]]; then
+        duplicate=""
+        for ((seen_index = 0; seen_index < seen_count; seen_index++)); do
+            seen_field="${seen[${seen_index}]}"
+            if [[ "${key}" == "${seen_field}" ]]; then
+                duplicate=1
+                break
+            fi
+        done
+        if [[ -n "${duplicate}" ]]; then
             kantainer_fail "${path} line ${lineno} sets ${key} a second time
     Two values for one field, and no way to tell which you meant. Delete one."
         fi
-        seen["${key}"]=1
+        seen[seen_count]="${key}"
+        seen_count=$(( seen_count + 1 ))
 
         printf -v "${key}" '%s' "${value}"
     done < "${path}"

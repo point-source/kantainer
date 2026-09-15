@@ -108,6 +108,21 @@ test:
         "./${t}"
     done
 
+# Run the operator-host contract with the Bash built into macOS. The broad
+# Linux gate above also covers image and installed-machine behavior, so this
+# entry point stays focused on the three commands a Mac operator actually uses.
+[group('Lint')]
+test-macos-compat:
+    #!/bin/bash
+    set -oue pipefail
+    work="$(mktemp -d)"
+    trap 'rm -rf "${work}"' EXIT
+    artifacts="${MACOS_COMPAT_ARTIFACTS:-${work}/artifacts}"
+    /bin/bash ./scripts/test-operator-config-compat.sh \
+        "${artifacts}" "${MACOS_COMPAT_REFERENCE:-}"
+    /bin/bash ./scripts/test-installer.sh --checksum-only
+    /bin/bash ./scripts/test-flash-macos.sh
+
 # Clean Repo
 [group('Utility')]
 clean:

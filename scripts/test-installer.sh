@@ -11,13 +11,23 @@
 # test chose, with the pin rewritten to match or to disagree - a 1.3 GB download
 # has no place in a gate that runs on every change.
 
+# Fixture scripts below contain expansions evaluated by those scripts.
+# shellcheck disable=SC2016
+
 set -oue pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FETCH="${REPO_ROOT}/scripts/fetch-installer.sh"
+CHECKSUM_ONLY=""
 
-# shellcheck source=/dev/null
-. "${REPO_ROOT}/scripts/ignition-lib.sh"
+case "${1-}" in
+    "") ;;
+    --checksum-only) CHECKSUM_ONLY="1" ;;
+    *)
+        echo "Usage: test-installer.sh [--checksum-only]" >&2
+        exit 2
+        ;;
+esac
 
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/versions.env"
@@ -35,24 +45,69 @@ not_ok() {
     failures=$(( failures + 1 ))
 }
 
+fixture_sha256() {
+    case "$(uname -s)" in
+        Darwin) shasum -a 256 | awk '{ print $1 }' ;;
+        *) sha256sum | cut -d ' ' -f 1 ;;
+    esac
+}
+
+# Build a throwaway root carrying a pin for CONTENT, without deciding whether
+# the installer starts in the cache or arrives through curl.
+stage_root() {
+    local dir="$1" content="$2" pin="${3-}" versions
+
+    mkdir -p "${dir}/output/installer"
+    if [[ -z "${pin}" ]]; then
+        pin="$(printf '%s' "${content}" | fixture_sha256)"
+    fi
+    versions="${dir}/versions.env.new"
+    sed "s/^FCOS_ISO_SHA256=.*/FCOS_ISO_SHA256=${pin}/" \
+        "${REPO_ROOT}/versions.env" > "${versions}"
+    mv "${versions}" "${dir}/versions.env"
+}
+
 # Build a throwaway repository root carrying the one file the script reads,
 # plus a cached "installer" of the test's own making. The pin is rewritten to
 # the real digest of those bytes unless the caller supplies a different one.
 stage() {
     local dir="$1" content="$2" pin="${3-}"
 
-    mkdir -p "${dir}/output/installer"
-    cp "${REPO_ROOT}/versions.env" "${dir}/versions.env"
-
+    stage_root "${dir}" "${content}" "${pin}"
     printf '%s' "${content}" > "${dir}/output/installer/${ISO_NAME}"
-    if [[ -z "${pin}" ]]; then
-        pin="$(printf '%s' "${content}" | sha256sum | cut -d ' ' -f 1)"
-    fi
-    sed -i "s/^FCOS_ISO_SHA256=.*/FCOS_ISO_SHA256=${pin}/" "${dir}/versions.env"
 }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
+
+# Select Darwin without depending on the Linux runner's uname, and turn any
+# accidental sha256sum use into an immediate failure. shasum itself is the
+# stock macOS checksum command and is intentionally not replaced.
+mkdir -p "${WORK}/darwin-bin"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'printf "%s\n" "${FIXTURE_UNAME:-Darwin}"' \
+    > "${WORK}/darwin-bin/uname"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'echo "sha256sum must not run on Darwin" >&2' \
+    'exit 97' \
+    > "${WORK}/darwin-bin/sha256sum"
+printf '%s\n' \
+    '#!/bin/bash' \
+    'output=""' \
+    'while [[ "$#" -gt 0 ]]; do' \
+    '    case "$1" in' \
+    '        --output) output="$2"; shift 2 ;;' \
+    '        *) shift ;;' \
+    '    esac' \
+    'done' \
+    '[[ -n "${output}" ]] || exit 2' \
+    'printf "%s" "${FIXTURE_DOWNLOAD_CONTENT-}" > "${output}"' \
+    > "${WORK}/darwin-bin/curl"
+chmod +x "${WORK}/darwin-bin/uname" "${WORK}/darwin-bin/sha256sum" \
+    "${WORK}/darwin-bin/curl"
+DARWIN_PATH="${WORK}/darwin-bin:${PATH}"
 
 ### A cached installer that matches the pin is used as it is
 
@@ -72,6 +127,19 @@ if [[ "${out:-}" == "${root}/output/installer/${ISO_NAME}" ]]; then
     ok "prints the verified path on stdout and nothing else"
 else
     not_ok "prints the verified path on stdout and nothing else (got: ${out:-})"
+fi
+
+### A supported Mac uses shasum for the same valid cached installer
+
+root="${WORK}/darwin-good"
+stage "${root}" "pretend this is Fedora CoreOS on macOS"
+
+if out="$(PATH="${DARWIN_PATH}" FIXTURE_UNAME=Darwin "${FETCH}" "${root}" 2> "${WORK}/darwin-good.err")" &&
+    [[ "${out}" == "${root}/output/installer/${ISO_NAME}" ]]; then
+    ok "verifies a valid cache with stock macOS checksum tools"
+else
+    not_ok "verifies a valid cache with stock macOS checksum tools"
+    cat "${WORK}/darwin-good.err" >&2
 fi
 
 ### A cached installer that does not match the pin is refused
@@ -102,16 +170,73 @@ else
     not_ok "names the installer file it refused"
 fi
 
+root="${WORK}/darwin-corrupt"
+stage "${root}" "not the installer you pinned on macOS" \
+    "0000000000000000000000000000000000000000000000000000000000000000"
+
+if PATH="${DARWIN_PATH}" FIXTURE_UNAME=Darwin "${FETCH}" "${root}" \
+        > "${WORK}/darwin-corrupt.out" 2> "${WORK}/darwin-corrupt.err"; then
+    not_ok "refuses a corrupt cache with stock macOS checksum tools"
+elif [[ ! -s "${WORK}/darwin-corrupt.out" ]] &&
+    grep -qF "${ISO_NAME}" "${WORK}/darwin-corrupt.err"; then
+    ok "refuses a corrupt cache with stock macOS checksum tools"
+else
+    not_ok "refuses a corrupt cache with the expected macOS outcome"
+fi
+
 ### Truncation is the same refusal
 
 root="${WORK}/truncated"
 full="pretend this is Fedora CoreOS"
-stage "${root}" "${full:0:8}" "$(printf '%s' "${full}" | sha256sum | cut -d ' ' -f 1)"
+stage "${root}" "${full:0:8}" "$(printf '%s' "${full}" | fixture_sha256)"
 
 if "${FETCH}" "${root}" > /dev/null 2>&1; then
     not_ok "refuses a truncated cached installer"
 else
     ok "refuses a truncated cached installer"
+fi
+
+### Download verification publishes only complete matching bytes
+
+download="a complete downloaded installer"
+root="${WORK}/darwin-download"
+stage_root "${root}" "${download}"
+
+if out="$(PATH="${DARWIN_PATH}" FIXTURE_UNAME=Darwin \
+        FIXTURE_DOWNLOAD_CONTENT="${download}" "${FETCH}" "${root}" \
+        2> "${WORK}/darwin-download.err")" &&
+    [[ "${out}" == "${root}/output/installer/${ISO_NAME}" ]] &&
+    [[ "$(cat "${root}/output/installer/${ISO_NAME}")" == "${download}" ]]; then
+    ok "publishes a valid download after stock macOS verification"
+else
+    not_ok "publishes a valid download after stock macOS verification"
+    cat "${WORK}/darwin-download.err" >&2
+fi
+
+root="${WORK}/darwin-bad-download"
+stage_root "${root}" "${download}"
+
+if PATH="${DARWIN_PATH}" FIXTURE_UNAME=Darwin \
+        FIXTURE_DOWNLOAD_CONTENT="corrupt transfer" "${FETCH}" "${root}" \
+        > "${WORK}/darwin-bad-download.out" 2> "${WORK}/darwin-bad-download.err"; then
+    not_ok "refuses a corrupt macOS download"
+elif [[ ! -s "${WORK}/darwin-bad-download.out" &&
+        ! -e "${root}/output/installer/${ISO_NAME}" ]] &&
+    grep -qF "The download was discarded" "${WORK}/darwin-bad-download.err"; then
+    ok "refuses and discards a corrupt macOS download"
+else
+    not_ok "discards a corrupt macOS download without publishing a path"
+fi
+
+if [[ -n "${CHECKSUM_ONLY}" ]]; then
+    echo
+    if [[ "${failures}" -eq 0 ]]; then
+        echo "all installer checksum checks behave as intended"
+    else
+        echo "${failures} installer checksum check(s) misbehaved"
+        exit 1
+    fi
+    exit 0
 fi
 
 ### The installer media's own configuration
@@ -120,6 +245,9 @@ fi
 # assertion below is something that fails silently on a machine nobody is
 # watching: a machine configuration the installer cannot read, a script systemd
 # will not execute, a unit that is present but not enabled.
+
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/ignition-lib.sh"
 
 RENDER_INSTALLER="${REPO_ROOT}/scripts/render-installer.sh"
 

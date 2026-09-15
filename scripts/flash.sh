@@ -22,6 +22,9 @@
 set -oue pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+KANTAINER_FLASH_STAGING=""
+KANTAINER_RUNTIME=""
+KANTAINER_PODMAN_USABLE=""
 
 # The same rules `just config-check` and `just render` apply, from the same
 # library: a configuration one of them accepts is one this can build from.
@@ -31,57 +34,291 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 . "${REPO_ROOT}/versions.env"
 
-# lsblk's own account of a device: type, model, size, and the disk a partition
-# belongs to. It fails when the path is not a block device, which covers a
-# typo'd path and a regular file in one verdict rather than two checks of ours.
-# Replaced by the tests, which have no USB stick.
-kantainer_device_facts() {
-    lsblk --json --nodeps --output TYPE,MODEL,SIZE,PKNAME "$1" 2> /dev/null |
-        jq -r '.blockdevices[0]
-               | [ .type, (.model // "unknown"), (.size // "unknown"), (.pkname // "") ]
-               | @tsv'
+kantainer_host() {
+    uname -s
 }
 
-# Refuses the two mistakes that have an objectively wrong outcome, and prints
-# the model and size of what is left.
-#
-# It does NOT try to work out whether a device is "safe" to erase. There is no
-# such judgement to make from here: the operator's spare stick and the operator's
-# only backup drive look identical to lsblk. Naming what is about to be erased
-# and asking is the whole of the defence, and it is the operator's to make.
-kantainer_check_device() {
-    local device="$1" facts type model size pkname
+kantainer_require_supported_host() {
+    local host="$1" architecture version major
 
-    facts="$(kantainer_device_facts "${device}")" ||
-        kantainer_fail "${device} is not a block device on this machine.
-    List what is attached with:
-        lsblk --nodeps --output NAME,MODEL,SIZE"
+    case "${host}" in
+        Linux)
+            return 0
+            ;;
+        Darwin)
+            architecture="$(uname -m)"
+            [[ "${architecture}" == "arm64" ]] ||
+                kantainer_fail "macOS flashing requires an Apple-silicon Mac; this host reports ${architecture:-an unknown architecture}."
 
-    IFS=$'\t' read -r type model size pkname <<< "${facts}"
+            version="$(sw_vers -productVersion 2> /dev/null || true)"
+            major="${version%%.*}"
+            case "${major}" in
+                "" | *[!0-9]*)
+                    kantainer_fail "could not determine the macOS version; macOS 26 or newer is required."
+                    ;;
+            esac
+            (( major >= 26 )) ||
+                kantainer_fail "macOS 26 or newer is required; this host reports ${version}."
+            ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
+}
 
-    if [[ "${type}" == "part" ]]; then
-        kantainer_fail "${device} is a partition, not a whole drive.
-    An installer written to a partition has no boot sector and cannot start.
-    You probably mean /dev/${pkname}."
+kantainer_runtime_usable() {
+    local runtime="$1"
+    command -v "${runtime}" > /dev/null 2>&1 &&
+        "${runtime}" info > /dev/null 2>&1
+}
+
+kantainer_select_runtime() {
+    local host="$1" docker_usable=""
+
+    KANTAINER_RUNTIME=""
+    KANTAINER_PODMAN_USABLE=""
+
+    case "${host}" in
+        Linux)
+            if ! kantainer_runtime_usable podman; then
+                kantainer_fail "Podman is not usable.
+    Start Podman or install it before flashing."
+            fi
+            KANTAINER_RUNTIME="podman"
+            ;;
+        Darwin)
+            if kantainer_runtime_usable docker; then
+                docker_usable="1"
+            fi
+            if kantainer_runtime_usable podman; then
+                KANTAINER_PODMAN_USABLE="1"
+            fi
+
+            if [[ -n "${docker_usable}" ]]; then
+                KANTAINER_RUNTIME="docker"
+            elif [[ -n "${KANTAINER_PODMAN_USABLE}" ]]; then
+                KANTAINER_RUNTIME="podman"
+            else
+                kantainer_fail "Docker Desktop and Podman are not usable.
+    Start or install one of them before flashing."
+            fi
+            ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
+}
+
+kantainer_personalize_installer() {
+    local runtime="$1" iso="$2" staging="$3"
+
+    set -- run --rm
+    case "${runtime}" in
+        docker) ;;
+        podman) set -- "$@" --security-opt label=disable ;;
+        *) return 2 ;;
+    esac
+
+    set -- "$@" \
+        --volume "$(dirname "${iso}"):/iso:ro" \
+        --volume "${staging}:/out:rw" \
+        "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
+        iso customize \
+        --live-ignition /out/installer.ign \
+        --output "/out/installer.iso" \
+        "/iso/$(basename "${iso}")"
+    "${runtime}" "$@"
+}
+
+kantainer_build_installer() {
+    local host="$1" runtime="$2" iso="$3" staging="$4" device="$5" retry
+
+    if kantainer_personalize_installer "${runtime}" "${iso}" "${staging}"; then
+        return 0
     fi
 
-    # Everything that is not a whole disk fails for the same reason the partition
-    # above does - loop, device-mapper, RAID and optical devices are not something
-    # a machine boots an installer from - so the rule is stated positively rather
-    # than as a list of things to exclude. A USB stick is always type "disk".
-    #
-    # This is NOT a judgement about whether the device is safe to erase. There is
-    # no such judgement to make from here, and the comment above says why. It is
-    # the same objective check as the partition one: lsblk's own verdict about
-    # what kind of device this is.
-    if [[ "${type}" != "disk" ]]; then
-        kantainer_fail "${device} is a ${type:-unrecognised} device, not a whole drive.
+    if [[ "${host}" == "Darwin" && "${runtime}" == "docker" ]]; then
+        echo "flash: Docker Desktop could not personalise the installer." >&2
+        if [[ -z "${KANTAINER_PODMAN_USABLE}" ]]; then
+            kantainer_fail "Podman is not usable. Nothing was written to ${device}."
+        fi
+
+        echo "Type podman to retry with Podman, or anything else to stop." >&2
+        read -r retry || retry=""
+        if [[ "${retry}" != "podman" ]]; then
+            kantainer_fail "Podman retry declined. Nothing was written to ${device}."
+        fi
+
+        rm -f "${staging}/installer.iso"
+        echo "flash: retrying the installer with Podman" >&2
+        if ! kantainer_personalize_installer podman "${iso}" "${staging}"; then
+            kantainer_fail "Podman could not personalise the installer. Nothing was written to ${device}."
+        fi
+        return 0
+    fi
+
+    kantainer_fail "Podman could not personalise the installer. Nothing was written to ${device}."
+}
+
+# One objective predicate for the advanced path. Tests replace this boundary;
+# ordinary selection trusts diskutil/lsblk's own verdict instead.
+kantainer_device_node_exists() {
+    [[ -b "$1" || -c "$1" ]]
+}
+
+kantainer_plist_value() {
+    local plist="$1" key="$2"
+    printf '%s' "${plist}" | plutil -extract "${key}" raw -o - -- - 2> /dev/null
+}
+
+kantainer_linux_device_facts() {
+    local device="$1" facts type model size parent whole
+    facts="$(
+        lsblk --json --nodeps --output TYPE,MODEL,SIZE,PKNAME "${device}" 2> /dev/null |
+            jq -r '.blockdevices[0]
+                   | [ .type, (.model // "unknown"), (.size // "unknown"), (.pkname // "unknown") ]
+                   | @tsv'
+    )" || return 1
+    [[ -n "${facts}" ]] || return 1
+    IFS=$'\t' read -r type model size parent <<< "${facts}"
+    if [[ "${type}" == "part" && "${parent}" != "unknown" ]]; then
+        whole="/dev/${parent}"
+    elif [[ "${type}" == "disk" ]]; then
+        whole="${device}"
+    else
+        whole="unknown"
+    fi
+    printf 'Linux\t%s\t%s\t%s\t%s\tunknown\tunknown\t%s\n' \
+        "${type:-unknown}" "${model:-unknown}" "${size:-unknown}" \
+        "${whole}" "${device}"
+}
+
+kantainer_darwin_device_facts() {
+    local device="$1" plist node parent is_whole internal physical model size kind whole
+    plist="$(diskutil info -plist "${device}" 2> /dev/null)" || return 1
+    [[ -n "${plist}" ]] || return 1
+
+    node="$(kantainer_plist_value "${plist}" DeviceNode || true)"
+    parent="$(kantainer_plist_value "${plist}" ParentWholeDisk || true)"
+    is_whole="$(kantainer_plist_value "${plist}" WholeDisk || true)"
+    internal="$(kantainer_plist_value "${plist}" Internal || true)"
+    physical="$(kantainer_plist_value "${plist}" VirtualOrPhysical || true)"
+    model="$(kantainer_plist_value "${plist}" MediaName || true)"
+    size="$(kantainer_plist_value "${plist}" TotalSize || true)"
+
+    case "${is_whole}" in
+        true) kind="disk" ;;
+        false) kind="part" ;;
+        *) kind="unknown" ;;
+    esac
+    if [[ -n "${parent}" ]]; then
+        whole="/dev/${parent#/dev/}"
+    elif [[ "${is_whole}" == "true" ]]; then
+        whole="${node}"
+    else
+        whole="unknown"
+    fi
+    printf 'Darwin\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${kind}" "${model:-unknown}" "${size:-unknown}" \
+        "${whole:-unknown}" "${internal:-unknown}" \
+        "${physical:-unknown}" "${node:-unknown}"
+}
+
+# Normalize the two operating systems' device accounts into eight non-empty
+# fields: host, kind, model, size, containing whole disk, internal state,
+# physical state, and canonical node. Tests replace this hardware boundary.
+kantainer_device_facts() {
+    local device="$1" host
+    host="$(kantainer_host)"
+    case "${host}" in
+        Linux) kantainer_linux_device_facts "${device}" ;;
+        Darwin) kantainer_darwin_device_facts "${device}" ;;
+        *) return 2 ;;
+    esac
+}
+
+# Print the normalized identity after applying the host's target policy.
+kantainer_check_device() {
+    local device="$1" mode="${2:-ordinary}" host facts
+    local fact_host type model size whole internal physical canonical
+
+    host="$(kantainer_host)"
+    case "${host}" in
+        Linux | Darwin) ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
+
+    if [[ "${mode}" == "advanced" ]]; then
+        [[ "${host}" == "Darwin" ]] ||
+            kantainer_fail "the advanced device override is only available on macOS."
+        if [[ ! "${device}" =~ ^/dev/[^/]+$ ]] ||
+            ! kantainer_device_node_exists "${device}"; then
+            kantainer_fail "${device} is not an existing block or character device node."
+        fi
+
+        # diskutil does not describe every character device. The advanced path
+        # deliberately admits those nodes, with unknown display facts.
+        facts="$(kantainer_device_facts "${device}" 2> /dev/null || true)"
+        if [[ -z "${facts}" ]]; then
+            facts="Darwin"$'\t'"device"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"unknown"$'\t'"${device}"
+        fi
+        printf '%s\n' "${facts}"
+        return 0
+    fi
+
+    if ! facts="$(kantainer_device_facts "${device}")"; then
+        if [[ "${host}" == "Linux" ]]; then
+            kantainer_fail "${device} is not a block device on this machine.
+    List what is attached with:
+        lsblk --nodeps --output NAME,MODEL,SIZE"
+        fi
+        kantainer_fail "${device} is not a macOS disk device.
+    List external physical disks with:
+        diskutil list external physical"
+    fi
+
+    IFS=$'\t' read -r fact_host type model size whole internal physical canonical <<< "${facts}"
+    [[ "${fact_host}" == "${host}" ]] ||
+        kantainer_fail "cannot safely classify ${device} from ${host} device facts."
+
+    if [[ "${host}" == "Linux" ]]; then
+        if [[ "${type}" == "part" ]]; then
+            kantainer_fail "${device} is a partition, not a whole drive.
+    An installer written to a partition has no boot sector and cannot start.
+    You probably mean ${whole}."
+        fi
+        if [[ "${type}" != "disk" ]]; then
+            kantainer_fail "${device} is a ${type:-unrecognised} device, not a whole drive.
     An installer has to be written to a physical drive to be bootable.
     List what is attached with:
         lsblk --nodeps --output NAME,TYPE,MODEL,SIZE"
+        fi
+        printf '%s\n' "${facts}"
+        return 0
     fi
 
-    printf '%s\t%s\n' "${model}" "${size}"
+    if [[ "${type}" == "part" ]]; then
+        kantainer_fail "${device} is a partition, not a whole disk.
+    Use ${whole} for the whole disk, or choose the advanced device override."
+    fi
+    if [[ "${type}" == "unknown" || "${model}" == "unknown" ||
+          "${size}" == "unknown" || "${whole}" == "unknown" ||
+          "${internal}" == "unknown" || "${physical}" == "unknown" ||
+          "${canonical}" == "unknown" ]]; then
+        kantainer_fail "cannot safely classify ${device} from macOS device facts."
+    fi
+    [[ "${canonical}" == "${device}" ]] ||
+        kantainer_fail "macOS reports ${device} as ${canonical}, so the supplied path is not its device node."
+    [[ "${whole}" == "${device}" && "${device}" =~ ^/dev/disk[0-9]+$ ]] ||
+        kantainer_fail "${device} is not the full /dev/diskN path of a whole macOS disk."
+    [[ "${internal}" == "false" ]] ||
+        kantainer_fail "${device} is an internal disk. The ordinary path accepts only external disks."
+    [[ "${physical}" == "Physical" ]] ||
+        kantainer_fail "${device} is a virtual disk. The ordinary path accepts only physical disks."
+
+    printf '%s\n' "${facts}"
 }
 
 # The last gate before the irreversible part. The device path has to be typed
@@ -97,22 +334,40 @@ kantainer_check_device() {
 # while dd wrote to the drive that inherited the name. Same objective verdict,
 # read at the moment it is used.
 kantainer_confirm_erase() {
-    local device="$1" facts model size answer
+    local device="$1" mode="${2:-ordinary}" expected="${3-}" facts
+    local host type model size whole internal physical canonical risk answer
 
     # Tested, not assumed: kantainer_fail exits, but inside a command
     # substitution that only kills the subshell. Without this the caller sails
     # on and asks the operator to confirm erasing a device that is not there,
     # with an empty model and size where the answer should be.
-    if ! facts="$(kantainer_check_device "${device}")"; then
+    if ! facts="$(kantainer_check_device "${device}" "${mode}")"; then
         exit 1
     fi
-    IFS=$'\t' read -r model size <<< "${facts}"
+    if [[ -n "${expected}" && "${facts}" != "${expected}" ]]; then
+        kantainer_fail "${device} changed after it was first checked.
+    Nothing was unmounted or written. Run the command again for the device now attached."
+    fi
+    IFS=$'\t' read -r host type model size whole internal physical canonical <<< "${facts}"
+
+    case "${host}:${mode}" in
+        Darwin:advanced)
+            risk="ADVANCED OVERRIDE — macOS safety classification bypassed"
+            ;;
+        Darwin:ordinary)
+            risk="external whole physical disk"
+            ;;
+        *)
+            risk="whole disk selected by the operator"
+            ;;
+    esac
 
     {
         echo
         echo "ABOUT TO ERASE ${device}"
         echo "    model: ${model}"
         echo "    size:  ${size}"
+        echo "    risk:  ${risk}"
         echo
         echo "Everything on that device will be gone, and this cannot be undone."
         echo "Type ${device} to go ahead, or anything else to stop."
@@ -134,27 +389,122 @@ kantainer_as_root() {
     fi
 }
 
+# The only function allowed to cross from confirmation into target mutation.
+kantainer_mutate_target() {
+    local image="$1" device="$2" facts="$4"
+    local host _type _model _size whole _internal _physical _canonical
+    local bytes buffered write_device suffix disk_number
+
+    IFS=$'\t' read -r host _type _model _size whole _internal _physical _canonical <<< "${facts}"
+
+    write_device="${device}"
+    if [[ "${host}" == "Darwin" ]]; then
+        if ! bytes="$(LC_ALL=C wc -c < "${image}" | tr -d '[:space:]')"; then
+            kantainer_fail "cannot read the personalized installer at ${image}.
+    Nothing was written to ${device}."
+        fi
+
+        # disk and rdisk are the buffered and unbuffered views of the same
+        # macOS device. Always unmount the buffered containing whole disk.
+        buffered="${device}"
+        case "${buffered}" in
+            /dev/rdisk*) buffered="/dev/disk${buffered#/dev/rdisk}" ;;
+        esac
+        if [[ "${whole}" == "unknown" && "${buffered}" == /dev/disk[0-9]* ]]; then
+            suffix="${buffered#/dev/disk}"
+            disk_number="${suffix%%[!0-9]*}"
+            [[ -n "${disk_number}" ]] && whole="/dev/disk${disk_number}"
+        fi
+
+        if [[ "${whole}" =~ ^/dev/disk[0-9]+$ ]]; then
+            if ! diskutil unmountDisk "${whole}"; then
+                kantainer_fail "could not unmount ${whole}.
+    Nothing was written to ${device}."
+            fi
+        fi
+
+        if [[ "${buffered}" == /dev/disk[0-9]* ]]; then
+            if (( bytes % 4096 == 0 )); then
+                write_device="/dev/r${buffered#/dev/}"
+            else
+                write_device="${buffered}"
+            fi
+        fi
+    fi
+
+    echo "flash: writing to ${device}" >&2
+    if [[ "${host}" == "Darwin" ]]; then
+        if ! kantainer_as_root dd if="${image}" of="${write_device}" bs=4194304; then
+            kantainer_fail "writing ${device} failed after it began.
+    The target may be incomplete. Do not boot from it."
+        fi
+    else
+        if ! kantainer_as_root dd \
+            if="${image}" \
+            of="${write_device}" \
+            bs=4M status=progress conv=fsync; then
+            kantainer_fail "writing ${device} failed after it began.
+    The target may be incomplete. Do not boot from it."
+        fi
+    fi
+    if ! kantainer_as_root sync; then
+        kantainer_fail "sync failed after writing ${device}.
+    The target may be incomplete. Do not boot from it."
+    fi
+
+    {
+        echo
+        echo "flash: ${device} is ready."
+        if [[ "${host}" == "Darwin" ]]; then
+            echo "Eject ${device} manually before removing it."
+        fi
+        echo "Boot the target machine from it with a wired network connection."
+        echo "It installs itself, reboots twice, and answers on https://<its-address>:9443."
+    } >&2
+}
+
+kantainer_flash_device() {
+    local image="$1" device="$2" mode="$3" initial_facts="$4"
+    kantainer_confirm_erase "${device}" "${mode}" "${initial_facts}"
+    kantainer_mutate_target "${image}" "${device}" "${mode}" "${initial_facts}"
+}
+
 main() {
-    local device="${1-}" config="${2:-kantainer.conf}"
-    local iso staging
+    local target="${1-}" config="${2:-kantainer.conf}"
+    local device mode="ordinary" initial_facts iso staging host
+
+    case "${target}" in
+        --advanced-device=*)
+            mode="advanced"
+            device="${target#--advanced-device=}"
+            ;;
+        *)
+            device="${target}"
+            ;;
+    esac
 
     [[ -n "${device}" ]] ||
         kantainer_fail "no device given.
     Usage: just flash <device> [config-file]
-    List what is attached with:
-        lsblk --nodeps --output NAME,MODEL,SIZE"
+    Advanced: just flash --advanced-device=<device> [config-file]
+    List Linux drives with:
+        lsblk --nodeps --output NAME,MODEL,SIZE
+    List macOS external physical disks with:
+        diskutil list external physical"
+
+    host="$(kantainer_host)"
+    kantainer_require_supported_host "${host}"
 
     kantainer_load_config "${config}"
     kantainer_validate_config "${config}"
 
     # Fail fast on a path that could never work, before spending a download on
     # it. What the operator is shown and confirms is read again below.
-    kantainer_check_device "${device}" > /dev/null
+    if ! initial_facts="$(kantainer_check_device "${device}" "${mode}")"; then
+        exit 1
+    fi
 
-    command -v podman > /dev/null ||
-        kantainer_fail "podman is not on PATH.
-    coreos-installer publishes no portable binary, so the installer is
-    personalised in the container pinned in versions.env."
+    kantainer_select_runtime "${host}"
 
     # Verified against the checksum committed to this repository, before
     # anything is written anywhere.
@@ -163,42 +513,27 @@ main() {
     # /var/tmp rather than /tmp: this holds a copy of a 1.3 GB ISO, and /tmp is
     # commonly a tmpfs sized for something smaller. mktemp gives 0700, and the
     # trap is armed before the operator's key and password are written into it.
-    staging="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kantainer-flash.XXXXXXXX)"
-    trap 'rm -rf "${staging}"' EXIT
+    staging="$(mktemp -d "${TMPDIR:-/var/tmp}/kantainer-flash.XXXXXXXX")"
+    KANTAINER_FLASH_STAGING="${staging}"
+    trap 'rm -rf "${KANTAINER_FLASH_STAGING}"' EXIT
 
     "${REPO_ROOT}/scripts/render-installer.sh" "${config}" > "${staging}/installer.ign"
 
-    echo "flash: building the installer for ${KANTAINER_USERNAME}'s machine" >&2
+    # The pinned coreos-installer, by digest. The verified ISO cache is mounted
+    # read-only and only the private staging directory is writable. Podman also
+    # disables relabelling of those operator-owned directories.
+    case "${KANTAINER_RUNTIME}" in
+        docker)
+            echo "flash: building the installer with Docker Desktop" >&2
+            ;;
+        podman)
+            echo "flash: building the installer with Podman" >&2
+            ;;
+    esac
+    kantainer_build_installer \
+        "${host}" "${KANTAINER_RUNTIME}" "${iso}" "${staging}" "${device}"
 
-    # The pinned coreos-installer, by digest. The cache is mounted read-only so
-    # a customise cannot damage the verified copy; label=disable because both
-    # mounts are the operator's own directories and relabelling their ISO cache
-    # to suit a container is not this command's business.
-    podman run --rm \
-        --security-opt label=disable \
-        --volume "$(dirname "${iso}"):/iso:ro" \
-        --volume "${staging}:/out:rw" \
-        "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
-        iso customize \
-        --live-ignition /out/installer.ign \
-        --output "/out/installer.iso" \
-        "/iso/$(basename "${iso}")"
-
-    kantainer_confirm_erase "${device}"
-
-    echo "flash: writing to ${device}" >&2
-    kantainer_as_root dd \
-        if="${staging}/installer.iso" \
-        of="${device}" \
-        bs=4M status=progress conv=fsync
-    kantainer_as_root sync
-
-    {
-        echo
-        echo "flash: ${device} is ready."
-        echo "Boot the target machine from it with a wired network connection."
-        echo "It installs itself, reboots twice, and answers on https://<its-address>:9443."
-    } >&2
+    kantainer_flash_device "${staging}/installer.iso" "${device}" "${mode}" "${initial_facts}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

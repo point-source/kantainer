@@ -73,14 +73,45 @@ yaml_string() {
     jq -Rn --arg value "$1" '$value'
 }
 
-# Placeholders are filled by bash parameter expansion, not sed or awk. An SSH
-# key comment is free text, and both of those tools reserve characters in
-# replacement position - & is the whole match, \ starts an escape - so a key
-# comment containing them comes out mangled or breaks the expression outright.
-# Bash substitutes the replacement literally.
+# Replace every literal placeholder found in the original text in one pass.
+# Replacement text is appended to separate output and never searched again, so
+# an SSH key comment containing another placeholder stays exactly that comment.
+# The scanner also avoids pattern-substitution replacement rules, which differ
+# between the Bash versions on supported operator hosts.
 fill() {
-    local text="$1" placeholder="$2" value="$3"
-    printf '%s' "${text//"${placeholder}"/"${value}"}"
+    local remaining="$1"
+    shift
+
+    local -a placeholders replacements
+    local placeholder matched rendered=""
+    local i pair_count=0
+
+    while [[ "$#" -gt 0 ]]; do
+        pair_count=$(( pair_count + 1 ))
+        placeholders[pair_count]="$1"
+        replacements[pair_count]="$2"
+        shift 2
+    done
+
+    while [[ -n "${remaining}" ]]; do
+        matched=""
+        for ((i = 1; i <= pair_count; i++)); do
+            placeholder="${placeholders[${i}]}"
+            if [[ "${remaining}" == "${placeholder}"* ]]; then
+                rendered="${rendered}${replacements[${i}]}"
+                remaining="${remaining:${#placeholder}}"
+                matched=1
+                break
+            fi
+        done
+
+        if [[ -z "${matched}" ]]; then
+            rendered="${rendered}${remaining:0:1}"
+            remaining="${remaining:1}"
+        fi
+    done
+
+    printf '%s' "${rendered}"
 }
 
 # What lets the machine verify its very first attachment, before any kantainer
@@ -94,9 +125,10 @@ kantainer_registries_d_yaml "${IMAGE_REF}" > "${STAGING}/kantainer-registries.ya
 BUTANE="${STAGING}/kantainer.bu"
 
 template="$(< "${REPO_ROOT}/butane/kantainer.bu.tmpl")"
-template="$(fill "${template}" "@@USERNAME@@" "$(yaml_string "${KANTAINER_USERNAME}")")"
-template="$(fill "${template}" "@@SSH_PUBLIC_KEY@@" "$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")")"
-template="$(fill "${template}" "@@ATTACH_IMAGE@@" "${ATTACH_IMAGE}")"
+template="$(fill "${template}" \
+    "@@USERNAME@@" "$(yaml_string "${KANTAINER_USERNAME}")" \
+    "@@SSH_PUBLIC_KEY@@" "$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")" \
+    "@@ATTACH_IMAGE@@" "${ATTACH_IMAGE}")"
 printf '%s\n' "${template}" > "${BUTANE}"
 
 # The wireless profile exists only when the operator named a network. A wired
@@ -111,7 +143,11 @@ if [[ -n "${KANTAINER_WIFI_SSID}" ]]; then
     # quietly, which associates with the wrong secret. Both are escaped here;
     # every other character, & | % and quotes included, goes in as it is.
     keyfile_escape() {
-        local value="${1//\\/\\\\}"
+        # Use the same one-pass literal scanner as the Butane template. Pattern
+        # substitution gives backslashes in replacement text different meaning
+        # across supported Bash versions.
+        local value
+        value="$(fill "$1" "\\" "\\\\")"
         case "${value}" in
             " "*) value="\\s${value#" "}" ;;
             "	"*) value="\\t${value#"	"}" ;;

@@ -29,6 +29,7 @@
 set -oue pipefail
 
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+HOST="$(uname -s)"
 
 fail() {
     echo "fetch-installer: $*" >&2
@@ -36,6 +37,11 @@ fail() {
 }
 
 [[ -f "${ROOT}/versions.env" ]] || fail "no versions.env in ${ROOT}"
+
+case "${HOST}" in
+    Linux | Darwin) ;;
+    *) fail "${HOST:-unknown} is not a supported host for installer verification" ;;
+esac
 
 # shellcheck source=/dev/null
 . "${ROOT}/versions.env"
@@ -61,9 +67,26 @@ ISO_URL="https://builds.coreos.fedoraproject.org/prod/streams/${FCOS_STREAM}/bui
 CACHE="${ROOT}/output/installer"
 ISO="${CACHE}/${ISO_NAME}"
 
-# Compare against the pin. sha256sum's own verdict, read from its exit status.
+# Compare against the pin using the host tool's own check verdict. macOS ships
+# shasum; requiring GNU coreutils would break the stock-host contract.
 verify() {
-    printf '%s  %s\n' "${FCOS_ISO_SHA256}" "$1" | sha256sum --quiet --check - > /dev/null 2>&1
+    case "${HOST}" in
+        Linux)
+            printf '%s  %s\n' "${FCOS_ISO_SHA256}" "$1" |
+                sha256sum --quiet --check - > /dev/null 2>&1
+            ;;
+        Darwin)
+            printf '%s  %s\n' "${FCOS_ISO_SHA256}" "$1" |
+                shasum -a 256 --check - > /dev/null 2>&1
+            ;;
+    esac
+}
+
+actual_digest() {
+    case "${HOST}" in
+        Linux) sha256sum "$1" | cut -d ' ' -f 1 ;;
+        Darwin) shasum -a 256 "$1" | awk '{ print $1 }' ;;
+    esac
 }
 
 if [[ -e "${ISO}" ]]; then
@@ -74,7 +97,7 @@ if [[ -e "${ISO}" ]]; then
     fail "the cached installer does not match the release pinned in versions.env
     file:     ${ISO}
     expected: ${FCOS_ISO_SHA256}
-    actual:   $(sha256sum < "${ISO}" | cut -d ' ' -f 1)
+    actual:   $(actual_digest "${ISO}")
     Nothing was written. Delete that file to fetch it again, or correct
     FCOS_ISO_SHA256 if you meant to change the pinned release."
 fi
@@ -96,7 +119,7 @@ verify "${PARTIAL}" ||
     fail "the downloaded installer does not match the release pinned in versions.env
     url:      ${ISO_URL}
     expected: ${FCOS_ISO_SHA256}
-    actual:   $(sha256sum < "${PARTIAL}" | cut -d ' ' -f 1)
+    actual:   $(actual_digest "${PARTIAL}")
     Nothing was written. The download was discarded."
 
 mv "${PARTIAL}" "${ISO}"

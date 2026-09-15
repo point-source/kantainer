@@ -11,7 +11,7 @@
 #
 # Four checks, all decidable from what the repository holds:
 #
-#   1. every `just <recipe>` named in a code span or code block is a real recipe
+#   1. every command beginning `just <recipe>` in a code span or code block names a real recipe
 #   2. every repository path named in code resolves to a file that exists
 #   3. every kantainer-*.service and KANTAINER_* field named in code is one this
 #      repository defines
@@ -91,7 +91,7 @@ check_recipes() {
             named+=("${file}:${recipe}")
         done < <(
             kantainer_code_text "${root}/${file}" |
-                grep -oE '(^|[^[:alnum:]_.-])just +[a-z][a-z0-9_-]*' |
+                grep -oE '^[[:space:]]*just +[a-z][a-z0-9_-]*' |
                 sed -E 's/.*just +//' |
                 sort -u
         )
@@ -290,9 +290,37 @@ expect_caught() {
     fi
 }
 
+expect_clean() {
+    local name="$1" doc="$2"
+    local tmp caught
+
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "${tmp}"' RETURN
+    mkdir -p "${tmp}/docs"
+    printf '%s\n' "${doc}" > "${tmp}/docs/scratch.md"
+    : > "${tmp}/README.md"
+
+    caught="$( check_recipes "${tmp}"; check_paths "${tmp}"; check_owned_names "${tmp}"; check_links "${tmp}" )"
+
+    if [[ -z "${caught}" ]]; then
+        echo "ok       - ${name}"
+    else
+        note_failure "${name} (${caught})"
+    fi
+}
+
 expect_caught "a recipe that does not exist is caught" \
     'Run `just definitely-not-a-recipe` to do the thing.' \
     'not a recipe'
+
+# The macOS advanced path puts a device option immediately after the recipe.
+# Keep checking the recipe name rather than mistaking the whole command for it.
+expect_caught "a recipe followed by a device option is caught" \
+    'Run `just definitely-not-a-recipe --advanced-device=/dev/disk7` to do the thing.' \
+    'not a recipe'
+
+expect_clean "a mise package named just is not read as a recipe" \
+    'On macOS, run `mise install just aqua:coreos/butane`.'
 
 expect_caught "a renamed script is caught" \
     'The rule lives in `scripts/definitely-not-a-script.sh`.' \

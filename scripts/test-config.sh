@@ -168,6 +168,28 @@ refuses "refuses a misspelt field rather than ignoring it" "KANTAINER_USERNMAE" 
 refuses "refuses a key that merely looks like two fields" "unknown field: KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY" \
     "KANTAINER_USERNAME KANTAINER_SSH_PUBLIC_KEY=x"
 
+# Duplicate tracking is separate from the value itself. In particular, a blank
+# optional field still counts as its first occurrence; accepting the later value
+# would silently turn a malformed configuration into a different machine.
+duplicate_refuses() {
+    local name="$1" key_name="$2" first="$3" second="$4"
+    config "${WORK}/conf" "${key_name}=${first}"
+    printf '%s=%s\n' "${key_name}" "${second}" >> "${WORK}/conf"
+
+    local out status=0
+    out="$("${CHECK}" "${WORK}/conf" 2>&1)" || status=$?
+    if [[ "${status}" -eq 0 ]]; then
+        not_ok "${name} (accepted it)"
+    elif [[ "${out}" != *"sets ${key_name} a second time"* ]]; then
+        not_ok "${name} (wrong refusal: ${out})"
+    else
+        ok "${name}"
+    fi
+}
+
+duplicate_refuses "refuses a duplicate field" KANTAINER_USERNAME operator another-operator
+duplicate_refuses "refuses a duplicate whose first value is empty" KANTAINER_TARGET_DRIVE "" /dev/nvme0n1
+
 run_missing() {
     local out status=0
     out="$("${CHECK}" "${WORK}/absent" 2>&1)" || status=$?
@@ -451,20 +473,21 @@ reads_back "NetworkManager reads back the passphrase" wifi-security psk "${TEST_
 # \ starts an escape - and a value mangled there is not a syntax error: it is a
 # key the machine will not accept, or a passphrase it cannot associate with,
 # discovered in person.
-ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C 'a&b\c|d%e' < /dev/null
+AWKWARD_KEY_COMMENT=$'single\'quote double"quote & back\\slash tab\t space $ ` @@ATTACH_IMAGE@@'
+ssh-keygen -q -t ed25519 -N '' -f "${WORK}/awkward" -C "${AWKWARD_KEY_COMMENT}" < /dev/null
 AWKWARD_KEY="$(cat "${WORK}/awkward.pub")"
-AWKWARD_PSK="${TEST_PASSPHRASE}"'&\|%'
-AWKWARD_SSID='net&work\one'
+AWKWARD_PSK=$'valid-pass \'" & back\\slash tab\t space $ ` | % @@SSID@@'
+AWKWARD_SSID=$'net \'" & back\\slash tab\t space $ ` | % @@PSK@@'
 
 render "KANTAINER_SSH_PUBLIC_KEY=${AWKWARD_KEY}" \
     "KANTAINER_WIFI_SSID=${AWKWARD_SSID}" "KANTAINER_WIFI_PASSPHRASE=${AWKWARD_PSK}"
 
-assert_jq "an SSH key comment containing & \\ | % survives intact" \
+assert_jq "an SSH key comment keeps literal characters and placeholder text" \
     '.passwd.users[0].sshAuthorizedKeys[0]' "${AWKWARD_KEY}"
 
-reads_back "an SSID containing & and \\ reaches NetworkManager intact" \
+reads_back "an SSID keeps literal characters and placeholder text" \
     wifi ssid "${AWKWARD_SSID}"
-reads_back "a passphrase containing & \\ | % reaches NetworkManager intact" \
+reads_back "a passphrase keeps literal characters and placeholder text" \
     wifi-security psk "${AWKWARD_PSK}"
 
 # A leading space is the other half of GLib's escaping rule: written raw it is
@@ -472,6 +495,11 @@ reads_back "a passphrase containing & \\ | % reaches NetworkManager intact" \
 render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE= ${TEST_PASSPHRASE} "
 reads_back "a passphrase with a leading space keeps it" \
     wifi-security psk " ${TEST_PASSPHRASE} "
+
+LEADING_TAB_PSK=$'\t'"${TEST_PASSPHRASE} "
+render "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE=${LEADING_TAB_PSK}"
+reads_back "a passphrase with a leading tab keeps it" \
+    wifi-security psk "${LEADING_TAB_PSK}"
 
 AWKWARD_PASSWORD="${TEST_PASSWORD}"'&\|%'
 render "KANTAINER_PORTAINER_PASSWORD=${AWKWARD_PASSWORD}"
