@@ -623,7 +623,14 @@ kantainer block with nothing after it. Both are the accepted cost of not owning 
 part. Something knocks on Portainer's port on a schedule for the life of the machine, so that
 statement lags reality by up to that interval — which is why it says when it last looked, and
 why a screen read seconds after a restart can show the two statements disagreeing while the
-port statement catches up. The block's position on the screen depends on the platform's own
+port statement catches up. The service statement has a smaller version of the same lag: it is
+re-read from a hook that fires while the unit is still stopping, so a deliberate stop can leave
+the word `deactivating` on the screen until the probe's next run replaces it with `inactive`.
+Ordering the renderer behind Portainer's own unit would close that window and was rejected for
+the reason above — the renderer's whole job is to report on a Portainer that may be stopped,
+failed or looping, and it must not be scheduled behind it. The word is what the service manager
+said at the moment it was asked, the port statement is already saying the port does not answer,
+and the next run corrects it. The block's position on the screen depends on the platform's own
 snippets, so a change there moves ours. Anyone standing at the machine learns its address and
 whether Portainer is serving; that requires physical presence, the address is not a secret to
 anyone already on that network, and the Portainer password remains the whole of the defence
