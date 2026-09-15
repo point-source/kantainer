@@ -574,47 +574,45 @@ Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:prior
 
 ## Console password §spec:console-password
 
-*Status: complete* — not yet confirmed on real hardware: nothing in this repository can boot a
-machine, so the login itself, and the question below about what the installer leaves in the boot
-partition, are both for the first hardware run.
+*Status: complete* — not confirmed on real hardware: nothing in this repository can boot a
+machine, so the login itself and the boot-partition question below are both for the first
+hardware run.
 
 The configuration file carries an optional console password for the machine's login account.
 
 Left blank, the machine is exactly what it is today: no account has a password, the login
-prompt cannot be satisfied by anyone, and the SSH key is the only way in. Set, the operator
-can log in at the machine's own keyboard with the account name and that password, and can
-administer the machine from that session.
+prompt cannot be satisfied by anyone, and the SSH key is the only way in. Set, the operator logs
+in at the machine's own keyboard and administers it from that session.
 
-The password never reaches the network. SSH refuses password authentication for every
-account whether or not a console password is set (§spec:remote-access), so setting one widens
-physical access and nothing else.
+The password never reaches the network. SSH refuses password authentication for every account
+whether or not one is set (§spec:remote-access), so setting one widens physical access and
+nothing else.
 
-The configuration check refuses a console password shorter than twelve characters, names the
-field, and writes nothing — the same floor, for the same reason, as the Portainer password
-(§spec:machine-configuration). A blank one is accepted rather than refused, and the check says
-plainly that a machine without one cannot be reached at all once its network fails, so that
-the operator declines the insurance knowingly rather than discovering it later with a keyboard
-in their hand.
-
-After installation the password exists on the machine only in its own account database.
-Nothing in kantainer writes a second readable copy onto the installed machine.
+The check refuses one shorter than twelve characters, names the field, and writes nothing — the
+same floor as the Portainer password (§spec:machine-configuration), for a different reason. A
+blank one is accepted rather than refused, and the check says plainly that a machine without one
+cannot be reached at all once its network fails, so the operator declines the insurance knowingly
+rather than discovering it later with a keyboard in their hand.
 
 **Decision and constraint.** §req:success-criteria items 22 to 25 require this, and
 §req:priorities ranks it fifth: insurance rather than daily use, off unless the operator asks
 for it, and it must leave the default posture exactly as locked down as it is today. That last
 clause is why the field is optional and why nothing about a machine with a blank one changes.
 
-The operator writes the password in readable form, at their direction, the same way they write
-the Portainer password. The configuration file's whole design is one literal value per line
-with no syntax to learn, and it already carries a secret that owns the machine — the USB stick
-is already an object whose loss costs a reflash and a rotated Portainer password. A second
-readable secret beside the first does not change that cost.
+The operator writes it readable, the same way they write the Portainer password: the file's
+whole design is one literal value per line with no syntax to learn, and the stick is already an
+object whose loss costs a reflash and a rotated Portainer password. A second readable secret
+beside the first does not change that cost.
 
-The password is converted into its stored form by the machine during installation rather than
-by the operator's host, because the supported operator hosts do not agree on a tool that can do
-it. The Bash and the OpenSSL that macOS 26 ships cannot produce the modern form, and
-§req:constraints forbids requiring a Mac operator to install anything extra. The machine can,
-and the machine is where the value is needed.
+The machine converts it into its stored form during installation rather than the operator's
+host, because the supported hosts do not agree on a tool that can: the Bash and the OpenSSL that
+macOS 26 ships cannot produce the modern form, and §req:constraints forbids requiring a Mac
+operator to install anything extra. The readable value therefore travels on the installer media
+rather than inside the machine's own configuration — the live environment is RAM and is gone at
+the first reboot, which makes "no second readable copy on the installed machine" a property of
+the shape of the thing rather than a step someone has to remember. After installation the
+password exists there only in the account database. A machine whose specification never reaches
+that conversion is left with a locked account, not an unknown credential: this fails closed.
 
 Privileged commands do not ask for the password again. The base platform already grants this
 account administrative rights without a prompt, which is how key-based administration over SSH
