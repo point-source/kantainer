@@ -30,6 +30,7 @@ trap 'rm -rf "${WORK}"' EXIT
 ssh-keygen -q -t ed25519 -N '' -f "${WORK}/id" -C kantainer-test < /dev/null
 TEST_SSH_KEY="$(cat "${WORK}/id.pub")"
 TEST_PASSWORD="$(head -c 24 /dev/urandom | base64)"
+TEST_CONSOLE_PASSWORD="$(head -c 24 /dev/urandom | base64)"
 TEST_PASSPHRASE="$(head -c 12 /dev/urandom | base64)"
 TEST_SSID="kantainer test net"
 
@@ -49,6 +50,7 @@ config() {
         [KANTAINER_USERNAME]="operator"
         [KANTAINER_SSH_PUBLIC_KEY]="${TEST_SSH_KEY}"
         [KANTAINER_PORTAINER_PASSWORD]="${TEST_PASSWORD}"
+        [KANTAINER_CONSOLE_PASSWORD]=""
         [KANTAINER_TARGET_DRIVE]=""
         [KANTAINER_WIFI_SSID]=""
         [KANTAINER_WIFI_PASSPHRASE]=""
@@ -132,6 +134,27 @@ refuses "refuses a blank Portainer password" "KANTAINER_PORTAINER_PASSWORD" \
 
 refuses "refuses a Portainer password Portainer would force a change on" "KANTAINER_PORTAINER_PASSWORD" \
     "KANTAINER_PORTAINER_PASSWORD=hunt"
+
+# The console password is the one optional field whose absence is REPORTED
+# rather than refused (SPEC.md §spec:machine-configuration). Blank is a
+# supported machine; too short is not, because the login prompt is the whole of
+# the gate - privileged commands never ask again (§spec:console-password).
+accepts "accepts a blank console password" \
+    "KANTAINER_CONSOLE_PASSWORD="
+
+accepts "accepts a console password at the twelve-character floor" \
+    "KANTAINER_CONSOLE_PASSWORD=123456789012"
+
+accepts "accepts a console password above the floor" \
+    "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+
+refuses "refuses a console password one character under the floor" "KANTAINER_CONSOLE_PASSWORD" \
+    "KANTAINER_CONSOLE_PASSWORD=12345678901"
+
+# The file's whole promise is that a value is taken literally to the end of the
+# line. A console password is the second place that promise is load-bearing.
+accepts "accepts a console password full of characters a shell would eat" \
+    "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"'$`"'"'"'\ &|%@@SSID@@'
 
 refuses "refuses a wireless network with no passphrase" "KANTAINER_WIFI_PASSPHRASE" \
     "KANTAINER_WIFI_SSID=${TEST_SSID}" "KANTAINER_WIFI_PASSPHRASE="
@@ -218,8 +241,45 @@ secrecy() {
     else
         ok "never prints the wireless passphrase"
     fi
+
+    config "${WORK}/conf" "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+    out="$("${CHECK}" "${WORK}/conf" 2>&1)"
+    if [[ "${out}" == *"${TEST_CONSOLE_PASSWORD}"* ]]; then
+        not_ok "never prints the console password"
+    else
+        ok "never prints the console password"
+    fi
 }
 secrecy
+
+# SPEC.md §spec:console-password: a blank console password is accepted, and the
+# check says plainly what declining costs, "so that the operator declines the
+# insurance knowingly rather than discovering it later with a keyboard in their
+# hand". A silent acceptance is the failure this asserts against.
+advises() {
+    local name="$1" phrase="$2"
+    shift 2
+    config "${WORK}/conf" "$@"
+
+    local out status=0
+    out="$("${CHECK}" "${WORK}/conf" 2>&1)" || status=$?
+
+    if [[ "${status}" -ne 0 ]]; then
+        not_ok "${name} (refused with: ${out})"
+    elif [[ "${out}" != *"${phrase}"* ]]; then
+        not_ok "${name} (never said: ${phrase})"
+    else
+        ok "${name}"
+    fi
+}
+
+advises "says what a machine with no console password costs" \
+    "you cannot reach it at all" \
+    "KANTAINER_CONSOLE_PASSWORD="
+
+advises "says the console password is set, without printing it" \
+    "Console password is set" \
+    "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
 
 ### render-ignition.sh
 

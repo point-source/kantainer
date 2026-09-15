@@ -20,6 +20,7 @@ KANTAINER_FIELDS=(
     KANTAINER_USERNAME
     KANTAINER_SSH_PUBLIC_KEY
     KANTAINER_PORTAINER_PASSWORD
+    KANTAINER_CONSOLE_PASSWORD
     KANTAINER_TARGET_DRIVE
     KANTAINER_WIFI_SSID
     KANTAINER_WIFI_PASSPHRASE
@@ -31,6 +32,12 @@ KANTAINER_FIELDS=(
 # is made to change it at next login, which is the outcome
 # §spec:machine-configuration exists to avoid.
 # https://docs.portainer.io/start/install/server/setup
+#
+# The console password is held to the SAME floor, for a DIFFERENT reason
+# (§spec:console-password). Nothing upstream imposes it there: it is load-bearing
+# because the login prompt is the whole of the gate. Privileged commands on the
+# machine never ask again, so whoever satisfies that prompt owns the machine.
+# One constant rather than two, because two would be a number to keep in step.
 KANTAINER_MIN_PASSWORD_LENGTH=12
 
 # WPA-PSK passphrase bounds, fixed by the standard: wpa_supplicant refuses
@@ -147,6 +154,19 @@ kantainer_validate_config() {
         kantainer_fail "KANTAINER_PORTAINER_PASSWORD is shorter than ${KANTAINER_MIN_PASSWORD_LENGTH} characters
     Portainer forces a change at first login below that, which is the trip to
     the machine this password exists to avoid."
+
+    # The one field whose ABSENCE is reported rather than refused
+    # (§spec:machine-configuration). Blank is a supported machine: it is exactly
+    # the machine this repository builds today, where no account has a password
+    # and the SSH key is the only way in. check-config.sh says what that costs.
+    #
+    # Set but too short is refused, because the login prompt is the entire gate.
+    if [[ -n "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
+        [[ "${#KANTAINER_CONSOLE_PASSWORD}" -ge "${KANTAINER_MIN_PASSWORD_LENGTH}" ]] ||
+            kantainer_fail "KANTAINER_CONSOLE_PASSWORD is shorter than ${KANTAINER_MIN_PASSWORD_LENGTH} characters
+    Anyone who gets past the login prompt owns the machine: privileged commands
+    there never ask for it again. Leave it blank if you do not want one."
+    fi
 
     # A drive is named the way the machine will look for it. `sda` renders
     # happily and then refuses on a machine that has already been carried to

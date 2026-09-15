@@ -49,6 +49,22 @@ KANTAINER_PORTAINER_PASSWORD=
 
 ### Optional
 
+# The password for logging in at the machine's OWN KEYBOARD, at least 12
+# characters. Leave it blank and no account has a password at all — which is
+# what this machine is without this line.
+#
+# Leaving it blank is a supported choice, not a mistake. It costs you this: if
+# this machine's network ever fails, you cannot reach it at all, and reflashing
+# is the only way back in.
+#
+# It never reaches the network. SSH refuses password logins for every account
+# whether or not you set this (SPEC.md §spec:remote-access), so it widens
+# physical access and nothing else.
+#
+# Twelve characters is a floor because the login prompt is the whole of the
+# gate: once past it, privileged commands do not ask again.
+KANTAINER_CONSOLE_PASSWORD=
+
 # The drive to install to, e.g. /dev/sda or /dev/nvme0n1. Leave blank on a
 # single-drive machine. On a machine with more than one drive, leaving this
 # blank means the installer stops and asks rather than erasing one
