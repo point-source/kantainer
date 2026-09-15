@@ -318,6 +318,11 @@ assert_jq "creates the login account" \
 assert_jq "gives that account the operator's SSH key" \
     '.passwd.users[0].sshAuthorizedKeys[0]' "${TEST_SSH_KEY}"
 
+# A machine with no console password is the machine this repository built before
+# the field existed: no account has a password at all (§spec:console-password).
+assert_jq "a blank console password leaves the account with no password at all" \
+    '.passwd.users[0] | has("passwordHash")' "false"
+
 if [[ "$(file_at /etc/ssh/sshd_config.d/10-kantainer-no-passwords.conf)" == *"PasswordAuthentication no"* ]]; then
     ok "sshd refuses password authentication"
 else
@@ -328,6 +333,51 @@ if [[ "$(file_at /etc/ssh/sshd_config.d/10-kantainer-no-passwords.conf)" == *"Kb
 else
     not_ok "sshd refuses keyboard-interactive authentication too"
 fi
+
+### the console password, and what it must NOT change
+
+# SPEC.md §spec:console-password: setting one "widens physical access and
+# nothing else". The remote posture is the thing that must not move, so the
+# whole drop-in object is compared between the two renders rather than the two
+# keywords grepped again - a change to its mode or its owner would slip past a
+# grep and open exactly the door §spec:remote-access closes.
+sshd_dropin() {
+    jq -S '.storage.files[]
+        | select(.path == "/etc/ssh/sshd_config.d/10-kantainer-no-passwords.conf")' \
+        < "${WORK}/out.json"
+}
+sshd_without_console_password="$(sshd_dropin)"
+
+render "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+
+if [[ "$(sshd_dropin)" == "${sshd_without_console_password}" ]]; then
+    ok "setting a console password leaves the sshd drop-in byte-identical"
+else
+    not_ok "setting a console password leaves the sshd drop-in byte-identical"
+fi
+
+# The hash CANNOT be produced here. The machine makes it during installation,
+# because the Bash and the OpenSSL macOS ships cannot produce the modern form
+# and §req:constraints forbids asking a Mac operator to install anything. What
+# the render carries is the locked placeholder scripts/install-to-disk replaces
+# on the machine.
+#
+# `*` rather than a token of ours: it is crypt's own "no password will ever
+# match this account", so an install that somehow never reaches the substitution
+# leaves the account locked rather than carrying an unknown credential.
+assert_jq "the login account carries a locked password placeholder" \
+    '.passwd.users[0].passwordHash' "*"
+
+# §spec:console-password: "Nothing in kantainer writes a second readable copy
+# onto the installed machine." This document IS the installed machine, so the
+# password has no business anywhere in it.
+if grep -Fq "${TEST_CONSOLE_PASSWORD}" "${WORK}/out.json"; then
+    not_ok "the console password never reaches the machine specification"
+else
+    ok "the console password never reaches the machine specification"
+fi
+
+render
 
 assert_jq "the Portainer password file is mode 0600" \
     '.storage.files[] | select(.path == "/etc/kantainer/portainer-admin-password") | .mode' "384"
