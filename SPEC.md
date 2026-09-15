@@ -196,82 +196,48 @@ Cites §req:success-criteria (13, 14, 18, 19), §req:user-stories,
 
 ## Flash target safety and write integrity §spec:flash-target-safety
 
-*Status: complete* — the existing Linux whole-disk rule remains, and the macOS ordinary,
-advanced, reclassification, confirmation, unmount, adaptive write, sync, failure, and
-manual-eject paths run through controlled fixtures and the real `just flash` entry point.
-The macOS-only harness includes a disposable RAM-disk write, but that branch remains
-unobserved in the current Linux runner; a physical USB write is not a release gate.
+*Status: complete* — controlled fixtures exercise the Linux and macOS paths through the real
+`just flash` command. The macOS harness also carries a disposable RAM-disk check for a Mac
+runner; the current Linux runner cannot execute that branch, and a physical USB write is not
+a release gate.
 
-On Linux, the flash command preserves its existing target rule: it accepts a whole disk,
-including an internal disk, after showing its current identity and receiving exact-path
-confirmation. On macOS, the ordinary path accepts only an external whole physical disk. It
-refuses an internal disk, a partition, a disk image or other virtual disk, a path that is not
-a device, a bare device name, a mount point, an unclassifiable device, and an unknown host
-platform. Every refusal names what was rejected and occurs before unmounting or writing.
+Linux keeps its established whole-disk rule, including internal disks. The ordinary macOS
+path accepts only an external whole physical disk and refuses partitions, internal or virtual
+disks, non-device paths, incomplete facts, and unsupported hosts before unmounting or writing.
+An explicit advanced choice admits any existing block or character device node with a
+stronger risk message; it does not weaken reclassification, confirmation, or write integrity.
 
-The operator can make a separate advanced choice to target any existing block or character
-device node, including an internal disk, partition, or virtual device that the ordinary
-macOS path refuses. This path announces that the safety classification has been bypassed and
-expands the possible loss to any data reachable through the chosen device. It still refuses
-regular files, mount points, bare names, nonexistent paths, and anything that is not a device
-node. The advanced choice does not weaken any confirmation, ordering, or write-integrity
-rule.
+The command classifies the target before installer preparation and again immediately before
+showing its current identity and risk. A changed or missing target, a refusal, any answer
+other than the exact supplied path, or end of input leaves the target untouched. Once
+confirmed, macOS unmounts the whole disk, uses the faster raw device only for images aligned
+to 4 KiB, writes every byte, and makes the result durable. Any unmount, write, or durability
+failure exits without success; a started write is reported as potentially incomplete. After
+success the operator is told to eject the disk manually, and the command never ejects it.
 
-The target is classified once before installer preparation and again immediately before
-confirmation, so a removed device or a path whose identity changed during a download is not
-described from stale information. The final prompt shows the current path, model, size, and
-risk classification, and proceeds only when the operator types the exact full path they
-supplied. A refusal, a different answer, or end of input does not unmount or write the
-target.
+**Decision and constraint.** Erasing the wrong disk is the workflow's only unrecoverable
+failure, so ordinary macOS flashing requires positive device classification. The advanced
+path remains available because §req:success-criteria requires intentional access to other
+real device nodes. Exact-path confirmation is still necessary because device metadata cannot
+distinguish an installer stick from an external backup. Buffered writes remain necessary for
+unaligned images; aligned images can safely use the faster raw interface.
 
-After exact confirmation, macOS unmounts every volume on the target before opening it for a
-write. An unmount failure ends the command without writing any image bytes. When the
-personalised image length is divisible by 4 KiB, the command uses macOS's faster unbuffered
-device interface; for every other length it uses the buffered interface so the final partial
-device sector is written completely. The confirmed identity remains the operator's original
-device path regardless of the interface selected for the write.
+**Alternatives rejected.** Linux's broad whole-disk rule was rejected for ordinary macOS
+flashing because macOS can identify known high-risk categories. Removing the advanced path
+would prevent intentional writes outside the common case. Always using the raw interface can
+lose a final partial sector; always using the buffered interface slows aligned images without
+improving integrity. Automatic eject was rejected in favor of a clear durable-write result
+followed by an explicit operator action.
 
-The command writes every image byte and makes the data durable before reporting the stick
-ready. A write or durability failure exits non-zero, never reports success, and warns that a
-write which had begun may have left the target incomplete. A successful macOS write tells
-the operator to eject the target manually before removing it; failure or success does not
-trigger an automatic eject.
+**Tradeoffs.** Positive classification cannot distinguish one external physical disk from
+another, and advanced mode deliberately permits dangerous targets. Reclassification narrows
+device-name reuse but cannot prevent a physical swap after confirmation. Unaligned images use
+the slower interface, and manual eject adds one step after success.
 
-**Decision and constraint.** macOS uses positive classification for its ordinary path and
-a conspicuous override for broader device access. §req:priorities identifies erasing the
-wrong disk as the only unrecoverable failure in the workflow, while §req:success-criteria
-requires an intentional escape hatch for real device nodes. The exact-path prompt remains
-the last gate because no local device metadata can distinguish a disposable USB stick from
-an external backup drive. The adaptive write interface was chosen because
-§req:quality-attributes requires byte-complete writes for images of any length, while an
-aligned image can safely use the substantially faster macOS path.
-
-**Alternatives rejected.** Applying Linux's accept-any-whole-disk rule to ordinary macOS
-flashing was rejected because a stock Mac can identify internal, external, physical, and
-virtual devices and the safety priority calls for refusing known high-risk categories.
-Removing the advanced path was rejected because operators need controlled access to real
-devices outside that common case. Always using the unbuffered interface was rejected because
-a partial final sector can fail after the target has already been overwritten. Always using
-the buffered interface was rejected because it makes every large write slower when aligned
-images can take the fast path without weakening integrity. Automatic eject was rejected in
-favor of an unambiguous durable-write result followed by a documented operator action.
-
-**Tradeoffs.** The ordinary macOS rule cannot tell a USB installer from an external backup,
-so exact confirmation still carries a destructive choice. The advanced path deliberately
-permits the internal system disk and other dangerous device nodes, giving a local operator
-with write privileges the ability to erase them. Reclassification narrows device-name reuse
-but cannot prevent a physical swap after the operator confirms. Manual eject adds one step
-after success. Unaligned images take the slower path to preserve their final bytes.
-
-**User-level verification.** On macOS, the operator lists external physical disks, supplies
-a `/dev/diskN` whole-disk path, sees its current identity, types that exact path, and observes
-confirmation before unmount, a complete write, durability, and the manual-eject instruction.
-The same path refuses an internal disk, partition, virtual disk, mount point, regular file,
-bare name, nonexistent path, and incomplete device facts without an unmount or write. A
-disposable virtual device proves the advanced opt-in, unmount-failure, aligned unbuffered,
-unaligned buffered, partial-write, durability-failure, and successful main-flow outcomes.
-The existing Linux whole-disk checks remain green, and small macOS fixtures exercise the
-same ordering in CI without exposing a real disk.
+**User-level verification.** The real entry-point fixtures cover ordinary and advanced
+selection, all pre-mutation refusals, exact confirmation, unmount ordering, aligned and
+unaligned writes, complete bytes, durability failures, Linux compatibility, and the final
+manual-eject instruction. Native macOS verification adds the disposable RAM-disk branch.
 
 Cites §req:success-criteria (1, 15, 16, 17, 19), §req:user-stories,
 §req:quality-attributes (Flash safety, Write integrity, Compatibility checks),
