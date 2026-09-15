@@ -1,0 +1,231 @@
+#!/bin/bash
+# Put this machine's address and network on the login screen
+# (SPEC.md §spec:console-display).
+#
+# The operator standing at the machine has one question the screen can answer
+# before they log in: what do I type into a browser. This writes the answer into
+# an agetty issue snippet, BELOW what Fedora CoreOS already prints there. The
+# platform's own per-interface line and its SSH host key fingerprints stay
+# exactly as they are - §spec:console-display chose that deliberately, so that
+# the platform's part of the screen keeps working if ours breaks.
+#
+# The machinery is the base image's: console-login-helper-messages already
+# enumerates interfaces, already drops snippets into /etc/issue.d, and already
+# redraws the login prompt on link events. This adds a file to that directory
+# and reuses its atomic writer. It does not reimplement any of it.
+#
+# WHY THE ADDRESS IS RESOLVED HERE AND NOT BY agetty. agetty expands \4{ens18}
+# to an interface's address at DISPLAY time, which is what the platform's own
+# line uses and why that line can never go stale. We cannot: an interface with
+# no lease expands \4{} to nothing, leaving a blank exactly where the address
+# belongs, and §req:success-criteria 20 exists to forbid that. Writing a literal
+# address is what lets the no-address case say so in words - and it is also why
+# this script has to be re-run on network events, which is what the dispatcher
+# in /usr/lib/NetworkManager/dispatcher.d is for.
+#
+# WHICH DEVICES COUNT. This machine runs Docker, and Portainer creates a bridge
+# for every network an operator defines. NetworkManager reports every one of
+# them as a connected device holding an address, and 172.17.0.1 reaches
+# Portainer from nowhere. Only ethernet and wifi devices that are connected and
+# hold an address anyone could type are this machine's own networks. The
+# platform's gensnippet_if walks /sys for `lower_` links to resolve bonds and
+# bridges; that is deliberately not copied, because §req:quality-attributes
+# scopes this to one machine on a wired or wireless network and a realness check
+# that guessed wrong would fail closed to an empty screen.
+#
+# The Portainer half of §spec:console-display - what the service manager says
+# about Portainer and whether its port actually answered - is batch 3. It gets
+# its own snippet at 91_kantainer_portainer.issue, directly below this one, and
+# its own unit. Nothing in this file needs to change for it.
+#
+# Arguments exist for the tests, which source this file and replace
+# kantainer_nmcli. The unit passes none, and main() runs only when the file is
+# executed rather than sourced.
+
+set -oue pipefail
+
+PORTAINER_PORT=9443
+
+# 90_ so the block lands below EVERY snippet the base image writes: the
+# platform's 21_clhm_ssh_host_keys and 22_clhm_<ifname>, and Fedora CoreOS's own
+# 30_coreos_ignition_* and 30_ssh_authorized_keys. agetty version-sorts the
+# directory, so a lower number would interleave our lines with Ignition's.
+SNIPPET_NAME=90_kantainer_network.issue
+
+CLHM_LIB=/usr/lib/console-login-helper-messages/libutil.sh
+CLHM_ISSUE_DEFS=/usr/lib/console-login-helper-messages/issue.defs
+
+# The only thing here that reads the machine. The tests replace it.
+kantainer_nmcli() {
+    nmcli "$@"
+}
+
+# The name of the wireless network a profile joined. The profile this repository
+# installs is called "kantainer-wireless" whatever network it is for
+# (butane/wireless.nmconnection.tmpl), so the connection's name is not the
+# network's name and the SSID has to be read from the profile itself.
+#
+# A backslash is escaped because agetty reads one as the start of an escape
+# sequence, and an SSID is whatever the operator typed into their configuration
+# file. When the SSID cannot be read at all, the line says "wireless" and stops
+# there rather than trailing off after a colon with nothing behind it.
+#
+# `-e no` matters here as much as it does on the device query. -g is terse mode,
+# which escapes a colon and a backslash in the VALUE - so an SSID of "Net:5G"
+# would arrive as "Net\:5G" and one of "Up\Stairs" as "Up\\Stairs". Escaping
+# that a second time below would put a backslash on the screen that the operator
+# never typed.
+kantainer_ssid() {
+    local profile="$1" ssid=""
+
+    ssid="$(kantainer_nmcli -e no -g 802-11-wireless.ssid connection show id "${profile}" 2> /dev/null)" ||
+        ssid=""
+
+    if [[ -z "${ssid}" ]]; then
+        printf 'wireless'
+    else
+        printf 'wireless: %s' "${ssid//\\/\\\\}"
+    fi
+}
+
+# An address written the way it is typed into a browser to reach Portainer.
+# Returns 1 for an address that is not one anybody can type.
+kantainer_browser_url() {
+    local address="${1%%/*}"
+
+    case "${address}" in
+        # The loopback reaches Portainer only from the machine itself, and the
+        # operator reading this screen is not on it.
+        127.*|::1) return 1 ;;
+        # An IPv6 link-local address needs a zone index the browser cannot
+        # supply. Every interface has one, so a renderer that took the first
+        # address it saw would print this on every machine.
+        fe80:*) return 1 ;;
+        '') return 1 ;;
+    esac
+
+    # An IPv6 address is bracketed in a URL, or the colons in front of the port
+    # are read as part of the address (RFC 3986).
+    if [[ "${address}" == *:* ]]; then
+        printf 'https://[%s]:%s\n' "${address}" "${PORTAINER_PORT}"
+    else
+        printf 'https://%s:%s\n' "${address}" "${PORTAINER_PORT}"
+    fi
+}
+
+# The lines a single device contributes, if any.
+# kantainer_device_lines <type> <state> <connection> <address>...
+kantainer_device_lines() {
+    local type="$1" state="$2" connection="$3"
+    shift 3
+
+    case "${type}" in
+        ethernet|wifi) ;;
+        *) return 0 ;;
+    esac
+
+    # NetworkManager's state 100 is "connected". Anything else is a device that
+    # is present but not carrying traffic.
+    [[ "${state}" == 100* ]] || return 0
+
+    local network
+    if [[ "${type}" == wifi ]]; then
+        network="$(kantainer_ssid "${connection}")"
+    else
+        network="wired"
+    fi
+
+    local address url
+    for address in "$@"; do
+        url="$(kantainer_browser_url "${address}")" || continue
+        printf 'Portainer at %s (%s)\n' "${url}" "${network}"
+    done
+}
+
+# The whole block, on stdout. Never empty: a machine with no address says so,
+# because a missing line reads as a broken display rather than as a machine that
+# has nowhere to be reached (§req:success-criteria 20).
+kantainer_network_block() {
+    local line key value emitted
+    local device="" type="" state="" connection=""
+    local -a addresses=()
+    local -a lines=()
+
+    # `-e no` turns off terse escaping: every key is read up to the first colon
+    # and the rest is the value, so a network name containing a colon or a
+    # backslash arrives here as the operator wrote it.
+    #
+    # The trailing `echo` is a sentinel. nmcli separates device records with a
+    # blank line but does not put one after the last record, so without it the
+    # final device - which on a wireless-only machine is the only one - would
+    # never be flushed.
+    while IFS= read -r line; do
+        if [[ -n "${line}" ]]; then
+            key="${line%%:*}"
+            value="${line#*:}"
+            case "${key}" in
+                GENERAL.DEVICE) device="${value}" ;;
+                GENERAL.TYPE) type="${value}" ;;
+                GENERAL.STATE) state="${value}" ;;
+                GENERAL.CONNECTION) connection="${value}" ;;
+                IP4.ADDRESS*|IP6.ADDRESS*) addresses+=("${value}") ;;
+            esac
+            continue
+        fi
+
+        if [[ -n "${device}" ]]; then
+            while IFS= read -r emitted; do
+                lines+=("${emitted}")
+            done < <(
+                kantainer_device_lines "${type}" "${state}" "${connection}" \
+                    ${addresses[@]+"${addresses[@]}"}
+            )
+        fi
+
+        device="" type="" state="" connection=""
+        addresses=()
+    done < <(
+        kantainer_nmcli -e no -t \
+            -f GENERAL.DEVICE,GENERAL.TYPE,GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP6.ADDRESS \
+            device show
+        echo
+    )
+
+    # Said in words, not left blank. The machine reaches this on a first boot
+    # with the cable out, and on any boot before DHCP has answered - both times
+    # when an operator is most likely to be standing in front of it.
+    if [[ "${#lines[@]}" -eq 0 ]]; then
+        echo 'Portainer: no network address yet - nothing to type into a browser.'
+        return 0
+    fi
+
+    printf '%s\n' "${lines[@]}"
+}
+
+main() {
+    # No check that these exist first. `set -e` already stops here with the
+    # missing path named, which is the same outcome a hand-written check would
+    # produce - and the condition needs a base image without
+    # console-login-helper-messages, which the digest pin in the Containerfile
+    # makes a deliberate act rather than an accident.
+    #
+    # RUN_SNIPPETS and write_via_tempfile come from the platform. Its writer
+    # stages the file under /run, renames it into place and relabels it, which
+    # is what keeps a half-written snippet off the screen.
+    # shellcheck source=/dev/null
+    . "${CLHM_LIB}"
+    # shellcheck source=/dev/null
+    . "${CLHM_ISSUE_DEFS}"
+
+    kantainer_network_block | write_via_tempfile "${RUN_SNIPPETS}/${SNIPPET_NAME}"
+
+    # Redraw every waiting login prompt. This is also what refreshes the
+    # platform's own per-interface line: it is an agetty escape, so the reload
+    # re-expands it from the same event that brought us here, and it cannot sit
+    # stale beside a correct kantainer line (SPEC.md §spec:console-display).
+    /usr/sbin/agetty --reload
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

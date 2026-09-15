@@ -491,7 +491,25 @@ Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
 
 ## Console display §spec:console-display
 
-*Status: not started*
+*Status: in progress* — the network half is in the image; the Portainer half is not started. The
+address and network-name lines, their no-address wording and their currency all ship — a snippet at
+`/etc/issue.d/90_kantainer_network.issue`, written by
+`/usr/libexec/kantainer/console-network-snippet` at boot and on every NetworkManager link and
+address event. The two Portainer statements below are not built. Not yet confirmed on real
+hardware: the build environment has no console and no network interface, so every check runs
+against fixture NetworkManager output.
+
+Four things to capture on the first hardware run, because nothing in this repository can reach
+them. `agetty --show-issue` renders the whole screen without a reboot and answers the first two.
+First, the kantainer block appears *below* the platform's lines: the `90_` prefix sorts under
+every snippet the pinned base image writes, but the screen is agetty's, and the tradeoff below
+already accepts that a change in the platform's snippets moves ours. Second, the block names the
+machine's real interface and omits `docker0` and the bridges Portainer creates — a filter wrong
+in the loose direction advertises an address that reaches Portainer from nowhere, and one wrong
+in the strict direction leaves the block empty. Third, plugging a cable changes the screen with
+nobody logged in. Fourth, the same `agetty --reload` redraws the platform's own per-interface
+line; that it does follows from that line being an agetty escape, but only a real console shows
+it happening.
 
 With a monitor attached, the machine's login screen answers the two questions an operator
 standing at it has: what to type into a browser, and whether Portainer is there. It answers

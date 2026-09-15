@@ -247,6 +247,13 @@ systemctl enable greenboot-healthcheck.service
 # This unit puts it there. See the script for the whole reasoning.
 systemctl enable kantainer-greenboot-grub.service
 
+# The login screen's address lines (SPEC.md §spec:console-display). This is the
+# boot-time run; the NetworkManager dispatcher restarts the same unit on every
+# link and address change afterwards. Enabling it is what makes the block appear
+# on a machine that boots onto a network and is never touched again - and
+# nothing about it waits for a monitor, a login, or a person.
+systemctl enable kantainer-console-network.service
+
 # The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
 # no exit status above reports it. If greenboot ever dropped that line, the
 # enable would still succeed and the machine would run the health check, report
@@ -257,6 +264,15 @@ test -L /etc/systemd/system/ostree-finalize-staged.service.requires/greenboot-se
 # mode that did not survive the copy would leave a machine with no health check
 # and nothing anywhere saying so.
 test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
+
+# NetworkManager does the same thing with a dispatcher script whose mode is
+# wrong: it skips it silently. The machine would boot, write the block once, and
+# then never update it again - and the screen would look right to anyone who did
+# not move the machine to another network. systemd would at least fail the unit
+# if the generator were not executable, but neither failure is one the build log
+# would otherwise show.
+test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
+test -x /usr/libexec/kantainer/console-network-snippet
 
 ### 4. Cleanup
 #
