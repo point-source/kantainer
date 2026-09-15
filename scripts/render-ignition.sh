@@ -18,6 +18,12 @@
 # password never passes through a substitution and never lands anywhere the
 # operator did not ask for it.
 #
+# The console password is the other way round: the readable value never enters
+# this document at all. `just flash` supplies its hash through
+# KANTAINER_RENDER_CONSOLE_PASSWORD_HASH; run without one, this prints the
+# locked placeholder, which is what keeps `just render` deterministic
+# (SPEC.md §spec:console-password). See the substitution below.
+#
 # Usage: render-ignition.sh [config-file]
 
 set -oue pipefail
@@ -124,20 +130,36 @@ kantainer_registries_d_yaml "${IMAGE_REF}" > "${STAGING}/kantainer-registries.ya
 
 BUTANE="${STAGING}/kantainer.bu"
 
-# The console password's HASH is not made here, and the password itself never
-# enters this document (SPEC.md §spec:console-password). The machine converts it
-# during installation, because the Bash and the OpenSSL macOS ships cannot
-# produce the modern form and §req:constraints forbids requiring a Mac operator
-# to install anything extra. scripts/render-installer.sh puts the readable value
-# on the installer media; scripts/install-to-disk hashes it there and replaces
-# the placeholder below.
+# The console password's readable form never enters this document
+# (SPEC.md §spec:console-password). What lands here is either the locked
+# placeholder or a hash somebody else made.
 #
-# Blank substitutes to the empty string, so a machine with no console password
-# renders exactly what it rendered before this field existed.
-if [[ -n "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
-    CONSOLE_PASSWORD_HASH=$'\n      password_hash: "*"'
-else
+# KANTAINER_RENDER_CONSOLE_PASSWORD_HASH is the seam scripts/flash.sh hands the
+# hash through: it obtains one from the coreos-installer container it already
+# pulls, and this substitution puts it in place BEFORE butane runs - so no jq
+# patch of rendered Ignition JSON is needed, on a host or in a container that
+# has none, and a $6$ string full of $ characters never goes through a
+# substitution that would reinterpret them.
+#
+# IT IS DELIBERATELY NOT ONE OF config-lib.sh's KANTAINER_FIELDS. `just render`
+# never sets it, the config parser refuses an unknown key, so the operator
+# cannot set it either - which is what keeps `just render` containerless,
+# deterministic and byte-identical between Linux and macOS. A $6$ hash has a
+# random salt, and scripts/test-operator-config-compat.sh compares those bytes.
+#
+# `*` when no hash was supplied: crypt's own "no password will ever match this
+# account", so a document that somehow reaches a machine unsubstituted leaves a
+# locked account rather than an unknown credential.
+#
+# Blank console password substitutes to the empty string whatever the seam says,
+# so a machine without one renders exactly what it rendered before this field
+# existed.
+if [[ -z "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
     CONSOLE_PASSWORD_HASH=""
+elif [[ -n "${KANTAINER_RENDER_CONSOLE_PASSWORD_HASH-}" ]]; then
+    CONSOLE_PASSWORD_HASH=$'\n      password_hash: '"$(yaml_string "${KANTAINER_RENDER_CONSOLE_PASSWORD_HASH}")"
+else
+    CONSOLE_PASSWORD_HASH=$'\n      password_hash: "*"'
 fi
 
 template="$(< "${REPO_ROOT}/butane/kantainer.bu.tmpl")"

@@ -356,15 +356,16 @@ else
     not_ok "setting a console password leaves the sshd drop-in byte-identical"
 fi
 
-# The hash CANNOT be produced here. The machine makes it during installation,
-# because the Bash and the OpenSSL macOS ships cannot produce the modern form
-# and §req:constraints forbids asking a Mac operator to install anything. What
-# the render carries is the locked placeholder scripts/install-to-disk replaces
-# on the machine.
+# The hash is NOT produced here, and `just render` is the reason. It is a
+# documented standalone command, it runs without a container, and
+# scripts/test-operator-config-compat.sh byte-compares its output between Linux
+# and macOS - which a $6$ hash, with its random salt, would break on the first
+# run. So this path emits the placeholder and `just flash` substitutes the real
+# hash before butane runs (§spec:console-password).
 #
 # `*` rather than a token of ours: it is crypt's own "no password will ever
-# match this account", so an install that somehow never reaches the substitution
-# leaves the account locked rather than carrying an unknown credential.
+# match this account", so a machine that somehow receives this document
+# unsubstituted has a locked account rather than an unknown credential.
 assert_jq "the login account carries a locked password placeholder" \
     '.passwd.users[0].passwordHash' "*"
 
@@ -376,6 +377,53 @@ if grep -Fq "${TEST_CONSOLE_PASSWORD}" "${WORK}/out.json"; then
 else
     ok "the console password never reaches the machine specification"
 fi
+
+### the flash path's seam: a hash supplied from outside
+
+# KANTAINER_RENDER_CONSOLE_PASSWORD_HASH is how `just flash` hands this script
+# the hash it obtained from the coreos-installer container. It is deliberately
+# NOT one of scripts/config-lib.sh's KANTAINER_FIELDS: the config parser refuses
+# an unknown key, so an operator cannot set it from kantainer.conf and `just
+# render` can never emit anything but the placeholder above.
+#
+# A fixed fixture hash rather than a real one, because a real $6$ salt is random
+# and this assertion has to be exact.
+# The single quotes are the point: `$6$` is crypt's literal method marker, not
+# an expansion.
+# shellcheck disable=SC2016
+FIXTURE_HASH='$6$fixturesalt$fixtureHASHvalue.WithDots/AndSlashes0123456789'
+
+KANTAINER_RENDER_CONSOLE_PASSWORD_HASH="${FIXTURE_HASH}" \
+    render "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+
+assert_jq "a supplied hash replaces the placeholder verbatim" \
+    '.passwd.users[0].passwordHash' "${FIXTURE_HASH}"
+
+# The whole reason the substitution happens BEFORE butane: the readable password
+# is never an input to this document, only the hash is.
+if grep -Fq "${TEST_CONSOLE_PASSWORD}" "${WORK}/out.json"; then
+    not_ok "a supplied hash keeps the readable password out of the specification"
+else
+    ok "a supplied hash keeps the readable password out of the specification"
+fi
+
+# The posture that must not move, checked again on the path that actually ships
+# a password: §spec:remote-access closes SSH to passwords whether or not one is
+# set, and the hash landing in the document must not touch that drop-in.
+if [[ "$(sshd_dropin)" == "${sshd_without_console_password}" ]]; then
+    ok "a supplied hash leaves the sshd drop-in byte-identical"
+else
+    not_ok "a supplied hash leaves the sshd drop-in byte-identical"
+fi
+
+# Blank console password wins over a supplied hash: there is no account to put
+# one on. This is the case §req:constraints calls a supported machine, and it
+# must stay the machine this repository built before the field existed.
+KANTAINER_RENDER_CONSOLE_PASSWORD_HASH="${FIXTURE_HASH}" \
+    render "KANTAINER_CONSOLE_PASSWORD="
+
+assert_jq "a supplied hash is ignored when no console password is set" \
+    '.passwd.users[0] | has("passwordHash")' "false"
 
 render
 

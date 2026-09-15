@@ -34,18 +34,23 @@ passwd:
     # set no console password. That is what keeps a machine without one
     # byte-for-byte the machine this repository built before the field existed.
     #
-    # When they did set one it becomes `password_hash: "*"`: crypt's own "no
-    # password will ever match this account", which scripts/install-to-disk
-    # replaces with the real hash on the machine being installed, just before
-    # coreos-installer runs.
+    # When they did set one it becomes the account's stored password, and which
+    # form depends on who is rendering (SPEC.md §spec:console-password):
     #
-    # The hash is made THERE rather than here because the supported operator
-    # hosts do not agree on a tool that can make it: the Bash and the OpenSSL
-    # macOS ships cannot produce the modern form, and REQUIREMENTS.md
-    # §req:constraints forbids requiring a Mac operator to install anything extra
-    # (SPEC.md §spec:console-password). The readable password travels on the
-    # installer media instead - see butane/installer.bu.tmpl - so that nothing
-    # writes a second readable copy onto the INSTALLED machine.
+    #   `just flash`  - the real $6$ hash, made on the operator's own host inside
+    #                   the coreos-installer container it already pulls, and
+    #                   substituted here BEFORE butane runs
+    #   `just render` - `password_hash: "*"`, crypt's own "no password will ever
+    #                   match this account"
+    #
+    # `just render` cannot carry the hash because a $6$ salt is random and
+    # scripts/test-operator-config-compat.sh byte-compares that command's output
+    # between Linux and macOS. The placeholder is what makes those bytes agree,
+    # and it fails closed: a document that reaches a machine unsubstituted leaves
+    # a locked account rather than an unknown credential.
+    #
+    # The readable password reaches NO artifact - not this document, not the
+    # installer media, not the stick.
     - name: @@USERNAME@@
       ssh_authorized_keys:
         - @@SSH_PUBLIC_KEY@@
