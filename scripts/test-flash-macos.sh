@@ -50,8 +50,17 @@ mkdir -p "${BIN}"
 
 printf '%s\n' \
     '#!/bin/bash' \
-    'printf "%s\n" "${FIXTURE_UNAME:-Darwin}"' \
+    'case "${1-}" in' \
+    '    -m) printf "%s\n" "${FIXTURE_ARCH:-arm64}" ;;' \
+    '    *) printf "%s\n" "${FIXTURE_UNAME:-Darwin}" ;;' \
+    'esac' \
     > "${BIN}/uname"
+
+printf '%s\n' \
+    '#!/bin/bash' \
+    '[[ "${1-}" == "-productVersion" ]] || exit 2' \
+    'printf "%s\n" "${FIXTURE_MACOS_VERSION:-26.0}"' \
+    > "${BIN}/sw_vers"
 
 printf '%s\n' \
     '#!/bin/bash' \
@@ -224,6 +233,7 @@ WRITE_CAPTURE="${WORK}/written-installer.iso"
 ALIGNED_EXPECTED="${WORK}/aligned-installer.iso"
 UNALIGNED_EXPECTED="${WORK}/unaligned-installer.iso"
 FIXTURE_PATH="${BIN}:${PATH}"
+FIXTURE_ARCH="arm64"
 FIXTURE_DOCKER_FAIL=""
 FIXTURE_DOCKER_USABLE=""
 FIXTURE_FAIL_SYNC=""
@@ -232,6 +242,7 @@ FIXTURE_FAIL_WRITE=""
 FIXTURE_UNALIGNED=""
 FIXTURE_PODMAN_FAIL=""
 FIXTURE_PODMAN_USABLE="1"
+FIXTURE_MACOS_VERSION="26.0"
 
 i=0
 while [[ "${i}" -lt 4096 ]]; do
@@ -254,6 +265,7 @@ fi
 reset_fixture() {
     : > "${EVENT_LOG}"
     rm -f "${INFO_COUNT}" "${WRITE_CAPTURE}"
+    FIXTURE_ARCH="arm64"
     FIXTURE_DOCKER_FAIL=""
     FIXTURE_DOCKER_USABLE=""
     FIXTURE_FAIL_SYNC=""
@@ -262,6 +274,7 @@ reset_fixture() {
     FIXTURE_UNALIGNED=""
     FIXTURE_PODMAN_FAIL=""
     FIXTURE_PODMAN_USABLE="1"
+    FIXTURE_MACOS_VERSION="26.0"
 }
 
 run_fixture() {
@@ -270,6 +283,7 @@ run_fixture() {
         cd "${REPO_ROOT}"
         env \
             PATH="${FIXTURE_PATH}" \
+            FIXTURE_ARCH="${FIXTURE_ARCH}" \
             FIXTURE_UNAME="${host}" \
             FIXTURE_CLASS="${class}" \
             FIXTURE_CHANGE="${change}" \
@@ -280,6 +294,7 @@ run_fixture() {
             FIXTURE_FAIL_UNMOUNT="${FIXTURE_FAIL_UNMOUNT}" \
             FIXTURE_FAIL_WRITE="${FIXTURE_FAIL_WRITE}" \
             FIXTURE_INFO_COUNT="${INFO_COUNT}" \
+            FIXTURE_MACOS_VERSION="${FIXTURE_MACOS_VERSION}" \
             FIXTURE_PODMAN_FAIL="${FIXTURE_PODMAN_FAIL}" \
             FIXTURE_PODMAN_USABLE="${FIXTURE_PODMAN_USABLE}" \
             FIXTURE_UNALIGNED="${FIXTURE_UNALIGNED}" \
@@ -313,6 +328,26 @@ assert_refused_before_mutation "a regular file" "${WORK}/regular-file" external
 assert_refused_before_mutation "a mount point" "${WORK}/mount-point" external
 assert_refused_before_mutation "a bare device name" disk7 external
 assert_refused_before_mutation "an unknown platform" /dev/disk7 external Plan9
+
+reset_fixture
+FIXTURE_ARCH="x86_64"
+if run_fixture /dev/disk7 external "" > "${WORK}/case.out" 2> "${WORK}/case.err"; then
+    not_ok "refuses an Intel Mac"
+elif grep -q "Apple-silicon Mac" "${WORK}/case.err" && [[ ! -s "${EVENT_LOG}" ]]; then
+    ok "refuses an Intel Mac before inspecting or changing the target"
+else
+    not_ok "explains the Apple-silicon requirement before touching the target"
+fi
+
+reset_fixture
+FIXTURE_MACOS_VERSION="25.9"
+if run_fixture /dev/disk7 external "" > "${WORK}/case.out" 2> "${WORK}/case.err"; then
+    not_ok "refuses an older macOS release"
+elif grep -q "macOS 26 or newer" "${WORK}/case.err" && [[ ! -s "${EVENT_LOG}" ]]; then
+    ok "refuses an older macOS release before inspecting or changing the target"
+else
+    not_ok "explains the macOS version requirement before touching the target"
+fi
 
 assert_runtime_success() {
     local name="$1" selected="$2" docker_usable="$3" podman_usable="$4" other runtime_command

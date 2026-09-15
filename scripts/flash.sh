@@ -38,6 +38,34 @@ kantainer_host() {
     uname -s
 }
 
+kantainer_require_supported_host() {
+    local host="$1" architecture version major
+
+    case "${host}" in
+        Linux)
+            return 0
+            ;;
+        Darwin)
+            architecture="$(uname -m)"
+            [[ "${architecture}" == "arm64" ]] ||
+                kantainer_fail "macOS flashing requires an Apple-silicon Mac; this host reports ${architecture:-an unknown architecture}."
+
+            version="$(sw_vers -productVersion 2> /dev/null || true)"
+            major="${version%%.*}"
+            case "${major}" in
+                "" | *[!0-9]*)
+                    kantainer_fail "could not determine the macOS version; macOS 26 or newer is required."
+                    ;;
+            esac
+            (( major >= 26 )) ||
+                kantainer_fail "macOS 26 or newer is required; this host reports ${version}."
+            ;;
+        *)
+            kantainer_fail "${host:-unknown} is not a supported host for flashing."
+            ;;
+    esac
+}
+
 kantainer_runtime_usable() {
     local runtime="$1"
     command -v "${runtime}" > /dev/null 2>&1 &&
@@ -464,6 +492,9 @@ main() {
     List macOS external physical disks with:
         diskutil list external physical"
 
+    host="$(kantainer_host)"
+    kantainer_require_supported_host "${host}"
+
     kantainer_load_config "${config}"
     kantainer_validate_config "${config}"
 
@@ -473,7 +504,6 @@ main() {
         exit 1
     fi
 
-    host="$(kantainer_host)"
     kantainer_select_runtime "${host}"
 
     # Verified against the checksum committed to this repository, before
