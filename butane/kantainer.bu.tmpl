@@ -24,12 +24,39 @@ passwd:
     # wheel and sudo are what Fedora CoreOS gives its own `core` user: remote
     # access exists for "the rare occasion something needs looking at", and an
     # account that cannot become root cannot do that.
+    #
+    # THE CONSOLE PASSWORD IS NOT WRITTEN HERE, AND NEITHER IS ITS HASH.
+    #
+    # The placeholder at the end of the `- sudo` line below - deliberately not
+    # spelled out in this comment, because render-ignition.sh replaces every
+    # occurrence it finds in this file and a multi-line replacement inside a
+    # comment would not stay a comment - becomes NOTHING AT ALL when the operator
+    # set no console password. That is what keeps a machine without one
+    # byte-for-byte the machine this repository built before the field existed.
+    #
+    # When they did set one it becomes the account's stored password, and which
+    # form depends on who is rendering (SPEC.md §spec:console-password):
+    #
+    #   `just flash`  - the real $6$ hash, made on the operator's own host inside
+    #                   the coreos-installer container it already pulls, and
+    #                   substituted here BEFORE butane runs
+    #   `just render` - `password_hash: "*"`, crypt's own "no password will ever
+    #                   match this account"
+    #
+    # `just render` cannot carry the hash because a $6$ salt is random and
+    # scripts/test-operator-config-compat.sh byte-compares that command's output
+    # between Linux and macOS. The placeholder is what makes those bytes agree,
+    # and it fails closed: a document that reaches a machine unsubstituted leaves
+    # a locked account rather than an unknown credential.
+    #
+    # The readable password reaches NO artifact - not this document, not the
+    # installer media, not the stick.
     - name: @@USERNAME@@
       ssh_authorized_keys:
         - @@SSH_PUBLIC_KEY@@
       groups:
         - wheel
-        - sudo
+        - sudo@@CONSOLE_PASSWORD_HASH@@
 
 systemd:
   units:

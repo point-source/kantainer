@@ -428,9 +428,16 @@ config-check config="kantainer.conf":
     @./scripts/check-config.sh "{{ config }}"
 
 # Print the machine specification rendered from that configuration
+#
+# The console password hash seam is cleared rather than inherited. `just flash`
+# sets KANTAINER_RENDER_CONSOLE_PASSWORD_HASH to hand the renderer a hash it made
+# in a container; this command promises the locked placeholder and bytes that
+# match on Linux and macOS (SPEC.md §spec:console-password,
+# §spec:operator-host-support), and an exported value in the caller's shell would
+# quietly break both.
 [group('Operator')]
 render config="kantainer.conf":
-    @./scripts/render-ignition.sh "{{ config }}"
+    @KANTAINER_RENDER_CONSOLE_PASSWORD_HASH= ./scripts/render-ignition.sh "{{ config }}"
 
 # `just flash` is the one command the operator runs: their configuration and a
 # device in, a bootable stick out (SPEC.md §spec:installer-media). Everything

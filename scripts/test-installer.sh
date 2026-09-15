@@ -323,6 +323,64 @@ else
     not_ok "names no drive when the configuration names none"
 fi
 
+### the console password, hashed before any of this ran
+
+# SPEC.md §spec:console-password. `just flash` converts the password on the
+# operator's own host and hands the hash down through the environment, so this
+# document carries NO readable console password and the installer media has
+# nothing to hash. The stick never leaves the desk carrying a readable secret.
+TEST_CONSOLE_PASSWORD="$(head -c 24 /dev/urandom | base64)"
+# shellcheck disable=SC2016  # `$6$` is crypt's literal method marker
+FIXTURE_HASH='$6$fixturesalt$fixtureHASHvalue0123456789'
+config "${WORK}/console.conf" "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+KANTAINER_RENDER_CONSOLE_PASSWORD_HASH="${FIXTURE_HASH}" \
+    "${RENDER_INSTALLER}" "${WORK}/console.conf" > "${WORK}/console.ign"
+
+# The seam that carries the whole batch: what reaches the stick is the stored
+# form, inside the machine configuration where the account actually lives.
+if [[ "$(file_contents "${WORK}/console.ign" /etc/kantainer/machine.ign |
+        jq -r '.passwd.users[0].passwordHash')" == "${FIXTURE_HASH}" ]]; then
+    ok "carries the hashed console password inside the machine configuration"
+else
+    not_ok "carries the hashed console password inside the machine configuration"
+fi
+
+# The file the machine used to hash from is gone entirely. Absent, not empty: an
+# empty file would still be a place for a readable password to appear.
+if jq -e '.storage.files[] | select(.path == "/etc/kantainer/console-password")' \
+        "${WORK}/console.ign" > /dev/null 2>&1; then
+    not_ok "stages no readable console password on the installer media"
+else
+    ok "stages no readable console password on the installer media"
+fi
+
+# The whole of the batch's promise about the stick, checked against every byte
+# of the document rather than the places we thought to look.
+if grep -Fq "${TEST_CONSOLE_PASSWORD}" "${WORK}/console.ign"; then
+    not_ok "puts the readable console password nowhere in the installer media"
+else
+    ok "puts the readable console password nowhere in the installer media"
+fi
+
+# Two arguments, because there is no third thing to hand it any more.
+if jq -r '.systemd.units[] | select(.name == "kantainer-install.service") | .contents' "${WORK}/console.ign" |
+        grep -Fq "ExecStart=/usr/local/bin/kantainer-install-to-disk /etc/kantainer/target-drive /etc/kantainer/machine.ign"; then
+    ok "hands the first-stage installer the drive rule and the machine, and nothing else"
+else
+    not_ok "hands the first-stage installer the drive rule and the machine, and nothing else"
+fi
+
+# Blank is a supported machine and it must not have moved: no password on any
+# account, and nothing extra staged (§req:constraints).
+if file_contents "${WORK}/wired.ign" /etc/kantainer/machine.ign |
+        jq -e '.passwd.users[0] | has("passwordHash") | not' > /dev/null 2>&1 &&
+    ! jq -e '.storage.files[] | select(.path == "/etc/kantainer/console-password")' \
+        "${WORK}/wired.ign" > /dev/null 2>&1; then
+    ok "a blank console password leaves no password and stages nothing"
+else
+    not_ok "a blank console password leaves no password and stages nothing"
+fi
+
 config "${WORK}/named.conf" "KANTAINER_TARGET_DRIVE=/dev/nvme0n1"
 "${RENDER_INSTALLER}" "${WORK}/named.conf" > "${WORK}/named.ign"
 

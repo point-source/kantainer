@@ -37,7 +37,18 @@ else
 fi
 
 echo "${CONFIG} is complete."
-echo "  login account: ${KANTAINER_USERNAME}, by SSH key only"
+echo "  login account: ${KANTAINER_USERNAME}, SSH by key only"
 echo "  network:       ${network}"
 echo "  drive:         ${drive}"
 echo "  Portainer administrator password is set."
+
+# The console password is the one field whose absence is reported rather than
+# refused (SPEC.md §spec:console-password). Blank is a supported machine, so
+# this is not a warning to be fixed - it is the cost of the choice, stated at
+# the moment it is made, rather than discovered later with a keyboard in hand.
+if [[ -n "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
+    echo "  Console password is set. You can log in at the machine's own keyboard."
+else
+    echo "  Console password is not set."
+    echo "  If this machine's network fails, you cannot reach it at all. Reflashing is the only way back."
+fi

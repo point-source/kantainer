@@ -1,0 +1,95 @@
+#!/bin/bash
+# Knock on Portainer's HTTPS port and record what happened
+# (SPEC.md §spec:console-display).
+#
+# This is one half of the two statements the login screen makes about Portainer.
+# The other half - what the service manager says - is read straight from
+# systemd by console-portainer-snippet. They are kept apart on purpose: a
+# container that started and then wedged is "active" to the service manager
+# while its web page does not load, and that is the one case that brings an
+# operator to the keyboard. Nothing here may resolve the two into one verdict.
+#
+# WHY A REQUEST AND NOT A CONNECT. Bash can open a TCP connection to a port in
+# one line, and it would be wrong: a wedged TLS listener accepts the connection
+# and then answers nothing, so a bare connect reports exactly the fault this
+# statement exists to catch as healthy. curl completes the handshake and reads a
+# response, so its exit status is the whole verdict - any HTTP status at all
+# means the port answered. --insecure is not a shortcut: Portainer generates its
+# own certificate on first run (§spec:portainer-service), and a probe that
+# rejected it would read every healthy machine as closed.
+#
+# WHY LOOPBACK. Docker publishes 9443 on every interface, so the machine can
+# always reach it through 127.0.0.1 - including on a machine with no address at
+# all, which is the state batch 2's network lines report in words and the one
+# where someone is most likely to be standing at the screen. The cost is that
+# this says "Portainer is serving", not "your browser can reach it": the network
+# path and the firewall are not on this probe's path. docs/verify.md says so.
+#
+# A CLOSED PORT IS A RESULT, NOT A FAILURE. This exits 0 either way. A unit that
+# went failed on a closed port would be a second, quieter report of the same
+# thing the screen already says - and systemd's failed state is not on the login
+# screen, so nothing would surface it.
+#
+# The function that touches the port exists so the tests can replace it. The
+# unit passes no arguments, and main() runs only when the file is executed
+# rather than sourced.
+
+set -oue pipefail
+
+PORTAINER_URL=https://127.0.0.1:9443/
+
+# A wedge can accept the connection and then never answer. Without a deadline
+# the probe would hang there rather than report it, and the timer would stack up
+# behind it.
+PROBE_TIMEOUT=5
+
+# Written by this script, read by console-portainer-snippet.
+#
+# /run is tmpfs and is empty at boot, which is the point: an answer that
+# survived a reboot would put a timestamp from the last boot on the screen as
+# though it were current. That is the same staleness §req:sc:screen-says-no-address
+# forbids for the address. The directory is created by
+# /usr/lib/tmpfiles.d/kantainer.conf rather than here, because it has to exist
+# on a machine whose Portainer never started - which is exactly the machine the
+# operator is reading the screen of.
+STATE_FILE=/run/kantainer/portainer-probe
+
+# The only thing here that reads the machine. The tests replace it.
+kantainer_probe_https() {
+    curl --silent --insecure --output /dev/null \
+        --max-time "${PROBE_TIMEOUT}" "${PORTAINER_URL}"
+}
+
+# Look once, and record the answer and the time it was looked.
+#
+# The format is one KEY=value per line, the shape of /etc/os-release, because
+# there is nothing here worth inventing a format for. It is PARSED rather than
+# sourced: CHECKED_AT holds a space, and a file under /run that the screen
+# sources is a shell injection waiting for someone to make that directory
+# writable.
+#
+# `date --rfc-3339=seconds` is the whole timestamp including the zone offset.
+# Trimming it to a wall-clock time would be ambiguous for one hour of every
+# year, and the operator reading it is deciding how old this answer is.
+kantainer_probe_once() {
+    local answered=no
+    if kantainer_probe_https; then
+        answered=yes
+    fi
+
+    # Written beside the file and renamed over it. rename(2) within a directory
+    # is atomic, so the screen can never read half an answer, and a probe
+    # interrupted partway leaves the previous answer intact rather than none.
+    local staging="${STATE_FILE}.staging"
+    printf 'ANSWERED=%s\nCHECKED_AT=%s\n' \
+        "${answered}" "$(date --rfc-3339=seconds)" > "${staging}"
+    mv "${staging}" "${STATE_FILE}"
+}
+
+main() {
+    kantainer_probe_once
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

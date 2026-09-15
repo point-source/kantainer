@@ -1,0 +1,151 @@
+#!/bin/bash
+# Put the two Portainer statements on the login screen
+# (SPEC.md §spec:console-display).
+#
+# The operator standing at the machine has two questions. Batch 2's
+# console-network-snippet answers the first - what to type into a browser. This
+# answers the second: is Portainer there. It writes a second snippet directly
+# below that one, so the two blocks read as one, still beneath everything the
+# platform prints.
+#
+# TWO STATEMENTS, NEVER ONE. §spec:console-display reports Portainer as what the
+# service manager says about it AND whether an HTTPS connection to its port was
+# actually answered, with the time it last looked. On a healthy machine they
+# agree, which is precisely why a single line would survive review and ship: it
+# is wrong only in the case that brings an operator to the keyboard. A container
+# that started and then wedged is "active" to the service manager while the web
+# page does not load. The screen shows the disagreement and does not resolve it,
+# because resolving it means agreeing with the machine against the person
+# reading the screen.
+#
+# Both lines are printed unconditionally. There is no branch anywhere below that
+# can collapse them, agreeing or not.
+#
+# WHY THE SERVICE MANAGER'S OWN WORD. `systemctl is-active` is systemd's
+# maintained verdict, and it is reprinted here verbatim rather than translated
+# into "running" or "stopped". Two reasons: a mapping table is our copy of
+# someone else's judgement and goes stale the moment systemd names a new state,
+# and the operator's next move is `systemctl status kantainer-portainer.service`
+# (docs/verify.md), where the word on the screen and the word in their terminal
+# should be the same word.
+#
+# WHY THE PORT ANSWER IS READ AND NOT TAKEN. Knocking on the port takes seconds
+# and can hang; this runs on every Portainer start and stop. So the knocking
+# happens on its own timer in portainer-probe, and this reads what it last
+# recorded. That is also why the line carries a timestamp: it is the only half
+# of the block that can be out of date, and it says by how much.
+#
+# Arguments exist for the tests, which source this file and replace
+# kantainer_systemctl. The unit passes none, and main() runs only when the file
+# is executed rather than sourced.
+
+set -oue pipefail
+
+PORTAINER_PORT=9443
+PORTAINER_UNIT=kantainer-portainer.service
+
+# 91_ so the block lands directly below batch 2's 90_kantainer_network.issue,
+# and with it below the platform's 21_clhm_ssh_host_keys and 22_clhm_<ifname>
+# and Fedora CoreOS's 30_coreos_ignition_* and 30_ssh_authorized_keys. agetty
+# version-sorts the directory. /usr/lib/tmpfiles.d/kantainer.conf already clears
+# the whole *_kantainer_* marker at boot, so this filename needs nothing there.
+SNIPPET_NAME=91_kantainer_portainer.issue
+
+# Written by /usr/libexec/kantainer/portainer-probe.
+STATE_FILE=/run/kantainer/portainer-probe
+
+CLHM_LIB=/usr/lib/console-login-helper-messages/libutil.sh
+CLHM_ISSUE_DEFS=/usr/lib/console-login-helper-messages/issue.defs
+
+# The only thing here that reads the machine. The tests replace it.
+kantainer_systemctl() {
+    systemctl "$@"
+}
+
+# What the machine's service manager says about Portainer.
+#
+# `is-active` exits non-zero for everything except active and prints the state
+# either way, so the WORD is the answer and the exit status is discarded. A
+# renderer that read the status instead would report every stopped Portainer as
+# unknown - agreeing with nothing and helping no one.
+#
+# "unknown" is for a systemctl that answered nothing at all. It is said plainly
+# rather than guessed, because a guess here is a statement about the machine
+# that nothing established.
+kantainer_service_line() {
+    local state
+    state="$(kantainer_systemctl is-active "${PORTAINER_UNIT}" 2> /dev/null || true)"
+
+    printf 'Portainer service: %s\n' "${state:-unknown}"
+}
+
+# Whether an HTTPS connection to Portainer's port was answered, and when that
+# was last looked at.
+#
+# The state file is PARSED, not sourced. CHECKED_AT holds a space, and a file
+# under /run that the login screen sources is a shell injection waiting for
+# someone to loosen that directory's mode.
+#
+# NO TIME MEANS NOT CHECKED, never "no answer". The renderer runs at boot and
+# the first probe lands seconds later, so the gap is real and it is exactly when
+# someone is most likely to be reading the screen. Printing a refusal there
+# would put a disagreement in front of them that nothing has established.
+kantainer_port_line() {
+    local key value answered="" checked=""
+
+    # The guard is the early-boot case, not defensive habit: before the first
+    # probe lands there is no file, and `set -e` would stop the renderer dead on
+    # the redirect. Read directly - a process substitution here would swallow a
+    # real read error silently, which is the opposite of what is wanted.
+    if [[ -r "${STATE_FILE}" ]]; then
+        while IFS='=' read -r key value; do
+            case "${key}" in
+                ANSWERED) answered="${value}" ;;
+                CHECKED_AT) checked="${value}" ;;
+            esac
+        done < "${STATE_FILE}"
+    fi
+
+    if [[ -z "${checked}" ]]; then
+        printf 'Portainer port %s: not checked yet\n' "${PORTAINER_PORT}"
+        return 0
+    fi
+
+    local answer='no answer'
+    if [[ "${answered}" == yes ]]; then
+        answer='answering'
+    fi
+
+    printf 'Portainer port %s: %s (checked %s)\n' \
+        "${PORTAINER_PORT}" "${answer}" "${checked}"
+}
+
+# The whole block, on stdout. Two lines, always.
+kantainer_portainer_block() {
+    kantainer_service_line
+    kantainer_port_line
+}
+
+main() {
+    # RUN_SNIPPETS and write_via_tempfile come from the platform. Its writer
+    # stages the file under /run, renames it into place and relabels it, which
+    # is what keeps a half-written block off the screen. No check that these
+    # exist first: `set -e` already stops here with the missing path named, and
+    # the condition needs a base image without console-login-helper-messages,
+    # which the digest pin in the Containerfile makes a deliberate act.
+    # shellcheck source=/dev/null
+    . "${CLHM_LIB}"
+    # shellcheck source=/dev/null
+    . "${CLHM_ISSUE_DEFS}"
+
+    kantainer_portainer_block | write_via_tempfile "${RUN_SNIPPETS}/${SNIPPET_NAME}"
+
+    # Redraw every waiting login prompt. Without it the block is written
+    # correctly and never seen: the prompt keeps whatever was on it when the
+    # machine booted.
+    /usr/sbin/agetty --reload
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

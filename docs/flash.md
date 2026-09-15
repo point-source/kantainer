@@ -79,7 +79,33 @@ ignored line would mean the value you meant to set never arrives, and nothing wo
   administrator before the web interface accepts its first connection, which also closes the
   window where an unclaimed administration page sits on the network.
 
+  **Unlike the console password below, this one is not scrambled.** Portainer has to be handed
+  the password itself, so it travels readable on the stick and stays readable on the machine at
+  `/etc/kantainer/portainer-admin-password`. Change it in Portainer once you are logged in —
+  `docs/verify.md` has the step, and Portainer ignores the delivered password from then on.
+
 **Optional:**
+
+- `KANTAINER_CONSOLE_PASSWORD` — the password for logging in at the machine's **own keyboard**,
+  at least 12 characters. Leave it blank and no account has a password at all.
+
+  **Leaving it blank is a supported choice.** It costs you one thing: if the machine's network
+  ever fails, you cannot reach it at all, and reflashing is the only way back in. `just
+  config-check` says so every time, so you decline it knowingly rather than discovering it with a
+  keyboard in your hand.
+
+  It never reaches the network. SSH refuses password logins for every account whether or not you
+  set this, so it widens physical access and nothing else.
+
+  Twelve characters is a floor because **the login prompt is the whole of the gate** — once past
+  it, privileged commands on the machine do not ask again.
+
+  You write it in readable form, like the Portainer password. `just flash` scrambles it on your
+  own machine, using the container it already runs, so the stick carries the scrambled form and
+  never your readable password — and after installation it exists on the machine only in its own
+  account database. A scrambled password is not a safe one: anyone who picks the stick up can
+  attack it offline, which is what the 12-character floor is for. Changing it later means
+  rendering and flashing again, like every other value in this file.
 
 - `KANTAINER_TARGET_DRIVE` — the drive to install to, e.g. `/dev/sda` or `/dev/nvme0n1`. Name it
   as the machine will see it. Leave blank on a single-drive machine.
@@ -107,13 +133,15 @@ to go and fix, then says what machine your file describes:
 
 ```
 kantainer.conf is complete.
-  login account: <name>, by SSH key only
+  login account: <name>, SSH by key only
   network:       wired
   drive:         installs to the machine's only drive, or stops and asks if there is more than one
   Portainer administrator password is set.
+  Console password is not set.
+  If this machine's network fails, you cannot reach it at all. Reflashing is the only way back.
 ```
 
-The password and the wireless passphrase are deliberately not echoed.
+The passwords and the wireless passphrase are deliberately not echoed.
 
 Add a path if your configuration lives outside the repository: `just config-check /path/to/my.conf`.
 
@@ -189,16 +217,20 @@ Everything that can refuse does so **before the device is touched**, in this ord
    typo'd or ineligible path costs you nothing.
 3. The runtime is checked. Linux requires Podman. macOS uses Docker Desktop when it is usable,
    otherwise Podman.
-4. The pinned Fedora CoreOS ISO is downloaded to `output/installer/` and verified against the
+4. If you set a console password, the container scrambles it. This also runs before the download,
+   so a runtime that cannot do it costs you nothing but the time to read why — and the stick is
+   never written carrying your readable password.
+5. The pinned Fedora CoreOS ISO is downloaded to `output/installer/` and verified against the
    checksum committed in `versions.env`. A cached copy is re-verified on every run, not just when
    it was written, and a cached file that disagrees with the pin is a refusal rather than a silent
    re-download.
-5. The installer configuration is rendered into a private staging directory.
-6. The pinned `coreos-installer` container writes your account, key and password into a copy of
+6. The installer configuration is rendered into a private staging directory, carrying the
+   scrambled console password rather than the one you typed.
+7. The pinned `coreos-installer` container writes your account, key and password into a copy of
    the ISO.
 
-If Docker Desktop fails while building that copy and Podman is usable, the command names the
-Docker failure and asks:
+If Docker Desktop fails at either container step — scrambling the console password, or building
+that copy — and Podman is usable, the command names the Docker failure and asks:
 
 ```
 Type podman to retry with Podman, or anything else to stop.

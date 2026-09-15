@@ -25,6 +25,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KANTAINER_FLASH_STAGING=""
 KANTAINER_RUNTIME=""
 KANTAINER_PODMAN_USABLE=""
+KANTAINER_CONSOLE_PASSWORD_HASH=""
 
 # The same rules `just config-check` and `just render` apply, from the same
 # library: a configuration one of them accepts is one this can build from.
@@ -130,25 +131,43 @@ kantainer_personalize_installer() {
     "${runtime}" "$@"
 }
 
+# REQUIREMENTS.md §req:constraints: "a failed Docker attempt never falls back to
+# Podman without the operator choosing that retry". Both container steps - the
+# console password's conversion and the installer build - go through here, so
+# that rule is written once rather than twice.
+#
+# Returns 0 only when the operator asked for the retry AND Podman can run. Every
+# other outcome exits, because every other outcome is the end of the command.
+kantainer_offer_podman_retry() {
+    local host="$1" runtime="$2" device="$3" failed="$4" retry
+
+    # Linux has only Podman, so there is nothing to offer and nothing to say
+    # about Docker. Returning without a word is what keeps the Linux refusal
+    # about the one runtime that host actually uses.
+    [[ "${host}" == "Darwin" && "${runtime}" == "docker" ]] || return 1
+
+    echo "flash: Docker Desktop could not ${failed}." >&2
+    if [[ -z "${KANTAINER_PODMAN_USABLE}" ]]; then
+        kantainer_fail "Podman is not usable. Nothing was written to ${device}."
+    fi
+
+    echo "Type podman to retry with Podman, or anything else to stop." >&2
+    read -r retry || retry=""
+    if [[ "${retry}" != "podman" ]]; then
+        kantainer_fail "Podman retry declined. Nothing was written to ${device}."
+    fi
+    return 0
+}
+
 kantainer_build_installer() {
-    local host="$1" runtime="$2" iso="$3" staging="$4" device="$5" retry
+    local host="$1" runtime="$2" iso="$3" staging="$4" device="$5"
 
     if kantainer_personalize_installer "${runtime}" "${iso}" "${staging}"; then
         return 0
     fi
 
-    if [[ "${host}" == "Darwin" && "${runtime}" == "docker" ]]; then
-        echo "flash: Docker Desktop could not personalise the installer." >&2
-        if [[ -z "${KANTAINER_PODMAN_USABLE}" ]]; then
-            kantainer_fail "Podman is not usable. Nothing was written to ${device}."
-        fi
-
-        echo "Type podman to retry with Podman, or anything else to stop." >&2
-        read -r retry || retry=""
-        if [[ "${retry}" != "podman" ]]; then
-            kantainer_fail "Podman retry declined. Nothing was written to ${device}."
-        fi
-
+    if kantainer_offer_podman_retry \
+        "${host}" "${runtime}" "${device}" "personalise the installer"; then
         rm -f "${staging}/installer.iso"
         echo "flash: retrying the installer with Podman" >&2
         if ! kantainer_personalize_installer podman "${iso}" "${staging}"; then
@@ -158,6 +177,64 @@ kantainer_build_installer() {
     fi
 
     kantainer_fail "Podman could not personalise the installer. Nothing was written to ${device}."
+}
+
+# Turn the operator's readable console password into the form the machine stores
+# (SPEC.md §spec:console-password). Prints the hash on stdout.
+#
+# THIS IS WHY IT HAPPENS HERE. The stick used to carry the readable password so
+# that the machine could scramble it during installation. It does not have to: a
+# readable secret on a physical object that leaves the operator's desk is worth
+# removing, and the failure moves here too - onto the operator's own host, before
+# a stick is written, where it can be read and fixed in place rather than into
+# emergency mode on a machine they have already carried the stick to.
+#
+# It runs in the coreos-installer image versions.env already pins for the ISO
+# build, so a Mac operator installs nothing new. That image carries no openssl,
+# no mkpasswd and no python3, but it carries the whole of shadow-utils, which
+# makes exactly the form we need. Its entrypoint IS coreos-installer, hence
+# --entrypoint bash.
+#
+# THE PASSWORD GOES IN ON STDIN AND NOWHERE ELSE. printf is a shell builtin, so
+# it never becomes a process anyone can see; /proc/<pid>/cmdline is readable by
+# anyone on this host. chpasswd splits on the FIRST colon, so a password
+# containing one is safe, and the configuration file's one-value-per-line format
+# means it can never contain a newline. useradd's stdin is closed so it cannot
+# consume the password before chpasswd sees it.
+kantainer_hash_console_password() {
+    local runtime="$1" hash
+
+    hash="$(
+        printf '%s' "${KANTAINER_CONSOLE_PASSWORD}" |
+            "${runtime}" run -i --rm \
+                --entrypoint bash \
+                "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" \
+                -c 'set -e
+                    useradd -M -N kantainer-console < /dev/null
+                    { printf "kantainer-console:"; cat; printf "\n"; } |
+                        chpasswd -c SHA512
+                    grep "^kantainer-console:" /etc/shadow | cut -d: -f2'
+    )" || return 1
+
+    # shadow-utils is someone else's tool and the shape of its output is theirs
+    # to change. Check the form this repository needs, not how they arrived at
+    # it: anything else here would put a machine on the stick that nobody can log
+    # in to, discovered months later with a keyboard in hand.
+    #
+    # THE WHOLE FORM, not the `$6$` prefix. A prefix check passes an error
+    # message that happens to start with it, a hash truncated by a full disk, and
+    # a second line appended after a good one - each of which renders into
+    # passwordHash and installs that machine. SHA-512 crypt is `$6$`, a salt, and
+    # exactly 86 characters of crypt's own alphabet, and the anchors reject
+    # anything with a newline in it.
+    #
+    # The single quotes are the point: `$6$` is crypt's literal method marker for
+    # SHA-512, not an expansion.
+    # shellcheck disable=SC2016
+    local sha512crypt='^\$6\$[./A-Za-z0-9]+\$[./A-Za-z0-9]{86}$'
+    [[ "${hash}" =~ ${sha512crypt} ]] || return 1
+
+    printf '%s\n' "${hash}"
 }
 
 # One objective predicate for the advanced path. Tests replace this boundary;
@@ -469,6 +546,41 @@ kantainer_flash_device() {
     kantainer_mutate_target "${image}" "${device}" "${mode}" "${initial_facts}"
 }
 
+# Obtain the console password's stored form, retrying with Podman if the
+# operator asks for it. Sets KANTAINER_CONSOLE_PASSWORD_HASH, and leaves it empty
+# when the configuration sets no console password - which is the supported
+# machine where no account has a password at all.
+#
+# On an accepted retry the ISO build below inherits the runtime that just proved
+# it can run a container, rather than trying the broken one again.
+kantainer_convert_console_password() {
+    local host="$1" device="$2"
+
+    KANTAINER_CONSOLE_PASSWORD_HASH=""
+    [[ -n "${KANTAINER_CONSOLE_PASSWORD}" ]] || return 0
+
+    if KANTAINER_CONSOLE_PASSWORD_HASH="$(
+        kantainer_hash_console_password "${KANTAINER_RUNTIME}"
+    )"; then
+        return 0
+    fi
+
+    if kantainer_offer_podman_retry \
+        "${host}" "${KANTAINER_RUNTIME}" "${device}" "convert the console password"; then
+        echo "flash: retrying the console password with Podman" >&2
+        if KANTAINER_CONSOLE_PASSWORD_HASH="$(kantainer_hash_console_password podman)"; then
+            KANTAINER_RUNTIME="podman"
+            return 0
+        fi
+        kantainer_fail "Podman could not convert the console password. Nothing was written to ${device}."
+    fi
+
+    kantainer_fail "${KANTAINER_RUNTIME} could not convert the console password.
+    It could not run the pinned coreos-installer image, or it did not answer with
+    a password hash. Nothing was written to ${device}. Installing without the
+    password would hand you a machine you cannot log in to at its keyboard."
+}
+
 main() {
     local target="${1-}" config="${2:-kantainer.conf}"
     local device mode="ordinary" initial_facts iso staging host
@@ -506,6 +618,10 @@ main() {
 
     kantainer_select_runtime "${host}"
 
+    # BEFORE the 1.3 GB download, so a conversion that cannot happen costs the
+    # operator nothing but the time to read why (SPEC.md §spec:console-password).
+    kantainer_convert_console_password "${host}" "${device}"
+
     # Verified against the checksum committed to this repository, before
     # anything is written anywhere.
     iso="$("${REPO_ROOT}/scripts/fetch-installer.sh")"
@@ -517,7 +633,12 @@ main() {
     KANTAINER_FLASH_STAGING="${staging}"
     trap 'rm -rf "${KANTAINER_FLASH_STAGING}"' EXIT
 
-    "${REPO_ROOT}/scripts/render-installer.sh" "${config}" > "${staging}/installer.ign"
+    # The hash goes in through the environment rather than an argument: the
+    # stick carries it now, and /proc/<pid>/cmdline is readable by anyone on this
+    # host while /proc/<pid>/environ is not. Empty when the operator set no
+    # console password, which renders the machine they have today.
+    KANTAINER_RENDER_CONSOLE_PASSWORD_HASH="${KANTAINER_CONSOLE_PASSWORD_HASH}" \
+        "${REPO_ROOT}/scripts/render-installer.sh" "${config}" > "${staging}/installer.ign"
 
     # The pinned coreos-installer, by digest. The verified ISO cache is mounted
     # read-only and only the private staging directory is writable. Podman also

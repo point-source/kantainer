@@ -12,8 +12,9 @@ and [SPEC.md](SPEC.md) for how it works.
   and how to tell a build published.
 - [Flash the installer to a USB stick](docs/flash.md) — the Linux and Apple-silicon macOS paths,
   target selection, the single flash command, and every step that can stop or alter the disk.
-- [Confirm Portainer is up after first boot](docs/verify.md) — the two reboots, the certificate
-  warning, the login page, and what to check when Portainer does not answer.
+- [Confirm Portainer is up after first boot](docs/verify.md) — the two reboots, the address on the
+  machine's own login screen, the certificate warning, the login page, and what to check when
+  Portainer does not answer.
 
 ## Working on this repository
 

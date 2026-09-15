@@ -18,12 +18,17 @@
 # the safety rule SPEC.md states - it is what makes rule 2 work at all. A
 # single-drive machine has the USB stick attached while this runs, so counting
 # it would present two drives, stop at a prompt, and break the unattended
-# installation REQUIREMENTS.md §req:success-criteria item 2 asks for.
+# installation REQUIREMENTS.md §req:sc:unattended-install asks for.
 #
 # coreos-installer's own unattended mode is deliberately unused: it clears every
 # attached drive rather than a named one, and it cannot be combined with a rule
 # of ours. This script calls `coreos-installer install` with one device, chosen
 # here.
+#
+# The console password is NOT this script's business. `just flash` converts it
+# on the operator's own host, before the stick is written, so what arrives here
+# already carries the stored form and there is nothing readable to protect
+# (SPEC.md §spec:console-password).
 #
 # Usage: install-to-disk <target-drive-file> <machine-ignition>
 

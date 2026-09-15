@@ -15,6 +15,13 @@
 # operator's SSH key and their Portainer password, so every intermediate file is
 # staged in a private temporary directory that is removed on exit.
 #
+# NO CONTAINER, so this stays runnable by hand. The console password's hash is
+# the one thing that needs one, and `just flash` makes it before calling this,
+# handing it down through KANTAINER_RENDER_CONSOLE_PASSWORD_HASH for
+# scripts/render-ignition.sh to substitute (SPEC.md §spec:console-password). Run
+# this directly and the machine configuration inside carries the locked
+# placeholder instead.
+#
 # Usage: render-installer.sh [config-file]
 
 set -oue pipefail
@@ -34,7 +41,7 @@ command -v butane > /dev/null ||
     It is pinned in mise.toml: run \`mise install\`."
 
 # mktemp gives 0700, and the trap is armed before the machine configuration -
-# which contains the password - is written into it.
+# which contains the Portainer password - is written into it.
 STAGING="$(mktemp -d)"
 trap 'rm -rf "${STAGING}"' EXIT
 

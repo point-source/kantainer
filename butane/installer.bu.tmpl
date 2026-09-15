@@ -77,6 +77,11 @@ storage:
     # Portainer password, which is why the installer media is produced on the
     # operator's own machine and never published
     # (REQUIREMENTS.md §req:quality-attributes).
+    #
+    # It also carries the console password, already in the form the machine
+    # stores: `just flash` converts it on the operator's host before this
+    # document is rendered, so nothing here is readable and nothing on this
+    # medium has any hashing left to do (SPEC.md §spec:console-password).
     - path: /etc/kantainer/machine.ign
       mode: 0600
       user:

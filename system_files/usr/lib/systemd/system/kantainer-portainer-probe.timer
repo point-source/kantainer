@@ -1,0 +1,26 @@
+[Unit]
+Description=Ask Portainer's HTTPS port whether it answers, every minute
+
+[Timer]
+# §spec:console-display: this statement "refreshes on its own schedule and says
+# when it last looked". One minute IS the lag the screen admits to - it is why
+# the port line carries a timestamp rather than presenting itself as current.
+#
+# OnBootSec is short because the first minutes after a boot are when someone is
+# most likely to be standing at the machine. Until the first probe lands there
+# is no answer to show, and the screen says "not checked yet" rather than
+# guessing.
+OnBootSec=30s
+OnUnitActiveSec=60s
+
+# systemd's default AccuracySec is one minute, which on a one-minute timer means
+# the interval the screen promises and the interval it gets are different
+# numbers. The work is one loopback request.
+AccuracySec=1s
+
+# Persistent= is left at its default of false. Persistent=true replays a missed
+# window at the next boot, and the answer it would replay lives in /run and is
+# gone by then. There is nothing to catch up on.
+
+[Install]
+WantedBy=timers.target

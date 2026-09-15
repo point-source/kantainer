@@ -429,7 +429,7 @@ rm -rf "${seed_missing}"
 # into /var is unpacked only from the image a machine INSTALLED, never from a
 # later one, so without this line a machine that updated into a new image would
 # come up with no /var/lib/portainer and Portainer would start over with no
-# settings and no administrator - §req:success-criteria item 7, broken by an
+# settings and no administrator - §req:sc:data-survives-updates, broken by an
 # update, which is the case this batch exists to keep working.
 assert "Portainer's data directory is recreated on machines that updated into this image" \
     grep -qE '^d[[:space:]]+/var/lib/portainer[[:space:]]' \

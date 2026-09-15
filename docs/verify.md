@@ -49,6 +49,77 @@ Portainer starts.
 The machine takes whatever address your router hands out. It assumes no fixed address, and it is
 not given one.
 
+**If you have a monitor attached, the login screen already tells you.** Below the Fedora CoreOS
+lines and the SSH host key fingerprints, the machine prints what to type into a browser — one
+line per network it is on:
+
+```
+Portainer at https://192.168.1.50:9443 (wired)
+Portainer at https://192.168.1.51:9443 (wireless: Kitchen)
+```
+
+You do not need to log in to read it, and you do not need to have been watching. It keeps up with
+the machine on its own: plug in a cable, move it to another network, or let the router hand out a
+new address, and the screen changes without a reboot.
+
+When the machine has no address at all it says so:
+
+```
+Portainer: no network address yet - nothing to type into a browser.
+```
+
+That is a machine that is up and has nowhere to be reached yet — usually a cable that is out, or
+a first boot before the router has answered. Docker's own networks never appear here; they are
+addresses the machine talks to itself on, not ones you can reach it at.
+
+**Below the address lines, the screen says what it knows about Portainer.** Two lines:
+
+```
+Portainer service: active
+Portainer port 9443: answering (checked 2026-09-15 14:03:11+01:00)
+```
+
+**Those are two separate statements, on purpose, and they can disagree.** The first is what the
+machine's own service manager says. The second is the result of actually opening an HTTPS
+connection to port 9443 and seeing whether anything answered.
+
+On a working machine they agree and you can stop reading. When they disagree, **the disagreement
+is the information** — the screen shows you both rather than picking one:
+
+```
+Portainer service: active
+Portainer port 9443: no answer (checked 2026-09-15 14:03:11+01:00)
+```
+
+That is a Portainer that started and then stopped serving. The machine thinks it is running,
+because the container is still there; your browser disagrees, because nothing answers. It is the
+reason you walked over to the machine, and it is the one case a single "Portainer: running" line
+would have got wrong. Go to [When Portainer does not
+answer](#when-portainer-does-not-answer).
+
+The reverse disagreement — `failed` with a port that answers — means the unit gave up while
+something is still listening. Same page.
+
+**The time in brackets is when the port was last asked, and the machine asks once a minute.** So
+that line can be up to a minute behind reality; the timestamp is there so you can tell how far.
+The service line is not on a timer — it changes the moment Portainer starts, stops or fails. Right
+after you restart Portainer, the two lines disagreeing for a few seconds is the port line catching
+up, not a fault.
+
+Until the first check lands, a few seconds into the boot, the line reads `not checked yet`. That
+is not a failure — it means nobody has asked yet.
+
+**The port is checked from the machine itself.** So `answering` means Portainer is serving; it
+does not promise that your network path to it is open. If the screen says `answering` and your
+browser still cannot reach it, the problem is between you and the machine, not on it.
+
+**This display only exists once the machine is running its own image.** During the installation
+and during the window in which it downloads that image, the screen is whatever stock Fedora
+CoreOS shows. If you are watching an early boot and see no kantainer line, read [When Portainer
+does not answer](#when-portainer-does-not-answer) below rather than assuming something broke.
+
+Without a monitor, find the address the other way.
+
 **Look at your router's device list or DHCP leases.** Nothing here sets the machine's hostname,
 so do not go looking for one called `kantainer` — it will appear under whatever Fedora CoreOS
 reports by default. Two reliable ways to pick it out:
@@ -88,6 +159,27 @@ about. The administrator account is created from the password in your configurat
 After logging in you land on a working dashboard with the machine's own Docker engine already
 connected. There is no environment to add.
 
+## Change the Portainer password now
+
+**Your Portainer password is readable on the USB stick, and readable on the machine.** It has to
+be: Portainer is handed the password itself, not a scrambled form of it, so the machine keeps a
+copy at `/etc/kantainer/portainer-admin-password` and hands it to Portainer at every start. The
+console password is not like this — that one is scrambled before the stick is written — but the
+Portainer password is, and Portainer's administrator is how someone reaches every container you
+run.
+
+So change it here, once, while you are already logged in: **your account menu → My account →
+change password.** Then the password that gets you in is one that was never on the stick and is
+not in a file on the machine.
+
+Portainer will not undo it. Once an administrator exists, Portainer ignores the delivered
+password entirely and says so in its log — "instance already has an administrator user defined,
+skipping admin password related flags". Your new password survives restarts and operating system
+updates. Only reflashing the machine starts over, and that builds a new Portainer anyway.
+
+The file stays where it is; it just stops being the way in. Treat the stick as carrying a secret
+regardless, and keep it somewhere you would keep a key.
+
 ## Optional: confirm the machine will keep itself updated
 
 **Skip this if you like — nothing here needs it, and the machine works either way.** It is worth
@@ -112,6 +204,23 @@ before every update; there is no second opinion to get.
 
 That refusal is deliberate. The alternative was a machine that updates itself from the internet
 without checking who signed the update.
+
+## Optional: confirm you can log in at the machine itself
+
+**Only if you set `KANTAINER_CONSOLE_PASSWORD`.** Skip this if you left it blank.
+
+Attach a monitor and keyboard and log in at the machine's own prompt, with the account name from
+your configuration file and that password. It is worth doing once, now, while the machine is
+still on your desk — the whole reason it exists is the day the network is gone and this is the
+only way in.
+
+You get an administrative session: privileged commands there do not ask for the password again.
+That is why the check refuses one shorter than 12 characters.
+
+If you left it blank there is nothing to test. No account has a password, the prompt cannot be
+satisfied by anyone, and your SSH key is the only way in.
+
+Either way, SSH still refuses password logins. A console password does not change that.
 
 ## How long
 
@@ -217,6 +326,11 @@ rpm-ostree status
 - **Nothing to see, and `rpm-ostree status` already shows the kantainer image** — the attach is
   done. The machine is past this stage; carry on to the next section.
 
+**A monitor shows no kantainer line during this window, and that is correct.** The address lines
+come from the kantainer image, and the machine is still downloading it — the screen is stock
+Fedora CoreOS until the attach finishes and it reboots. An absent line here says nothing about
+whether the download is going well; the `systemctl status` above is what answers that.
+
 ## What to look at once the machine is running its own image
 
 SSH in and work upward, stopping at the first thing that is not running:
@@ -229,6 +343,18 @@ systemctl status kantainer-portainer.service        # Portainer itself
 journalctl -u kantainer-portainer.service -b
 docker ps
 ```
+
+**If the login screen showed the two Portainer lines disagreeing, start with `docker ps`.** A
+service the machine calls `active` whose port does not answer is a container that is still there
+and no longer serving — the journal for `kantainer-portainer.service` usually says what it hit.
+Restarting it is the first thing to try:
+
+```bash
+systemctl restart kantainer-portainer.service
+```
+
+Watch the login screen afterwards if you have a monitor on it: the service line moves within
+seconds — briefly through `activating` — and the port line follows within a minute.
 
 Two of these are built to explain themselves rather than fail quietly:
 

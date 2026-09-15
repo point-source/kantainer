@@ -1,5 +1,6 @@
 #!/bin/bash
-# Tests for the first-stage installer's drive rule (SPEC.md §spec:drive-selection).
+# Tests for the first-stage installer's drive rule (SPEC.md
+# §spec:drive-selection).
 #
 # REQUIREMENTS.md §req:priorities ranks not destroying data third and notes it
 # is the only failure in this system that is not recoverable. Everything else
@@ -100,7 +101,7 @@ fi
 
 ### The configuration names nothing
 
-# The case REQUIREMENTS.md §req:success-criteria item 2 is about: one drive, no
+# The case REQUIREMENTS.md §req:sc:unattended-install is about: one drive, no
 # keyboard. The boot medium must not be counted, or this machine stops at a
 # prompt and the whole unattended promise is gone.
 if got="$(select_drive "" "" 'sda|Samsung SSD|465.8G|S3Z8NB' "${STICK}" 2>/dev/null)" &&
@@ -179,10 +180,59 @@ else
     not_ok "says a drive's model and serial are unknown rather than printing nothing"
 fi
 
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+# What the stick carries for a machine with a console password: the stored form
+# already in place, because `just flash` made it on the operator's host before
+# the stick was written.
+hashed_ignition() {
+    jq -cn '{ignition:{version:"3.5.0"},
+             passwd:{users:[{name:"operator", passwordHash:"$6$fixture$hash",
+                             sshAuthorizedKeys:["ssh-ed25519 AAAA test"]}]}}'
+}
+
+### The whole of main(), on the success path
+
+# Everything above drives one function. This drives the program, because the bug
+# this catches lives in the seam between them: an EXIT trap that referred to a
+# local of main() aborted the script AFTER a successful install, which failed
+# kantainer-install.service and fired its OnFailure=emergency.target. The
+# operator would have watched a correct install end in emergency mode, with no
+# way to tell it from a real failure.
+#
+# coreos-installer and systemctl are replaced: nothing here may write to a disk
+# or reboot anything.
+hashed_ignition > "${WORK}/main.ign"
+: > "${WORK}/main-target"
+
+if (
+    # shellcheck disable=SC2329  # called by main(), which shellcheck cannot see
+    coreos-installer() { printf '%s\n' "$3" > "${WORK}/installed-from"; }
+    # shellcheck disable=SC2329
+    systemctl() { :; }
+    # shellcheck disable=SC2329
+    kantainer_list_disks() { disks_json 'sda|Samsung SSD|465.8G|S3Z8NB' "${STICK}"; }
+    main "${WORK}/main-target" "${WORK}/main.ign"
+) > /dev/null 2>&1; then
+    ok "a successful install exits cleanly"
+else
+    not_ok "a successful install exits cleanly"
+fi
+
+# The operator's own machine.ign, installed as it arrived. Nothing is patched
+# here any more, so there is no copy to make and none to clean up.
+if [[ "$(cat "${WORK}/installed-from")" == "${WORK}/main.ign" ]] &&
+    [[ -e "${WORK}/main.ign" ]]; then
+    ok "installs the machine configuration the stick carried, untouched"
+else
+    not_ok "installs the machine configuration the stick carried, untouched"
+fi
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
-    echo "all drive selection checks behave as intended"
+    echo "all first-stage installer checks behave as intended"
 else
-    echo "${failures} drive selection check(s) misbehaved"
+    echo "${failures} first-stage installer check(s) misbehaved"
     exit 1
 fi

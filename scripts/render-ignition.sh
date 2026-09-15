@@ -18,6 +18,12 @@
 # password never passes through a substitution and never lands anywhere the
 # operator did not ask for it.
 #
+# The console password is the other way round: the readable value never enters
+# this document at all. `just flash` supplies its hash through
+# KANTAINER_RENDER_CONSOLE_PASSWORD_HASH; run without one, this prints the
+# locked placeholder, which is what keeps `just render` deterministic
+# (SPEC.md §spec:console-password). See the substitution below.
+#
 # Usage: render-ignition.sh [config-file]
 
 set -oue pipefail
@@ -69,8 +75,12 @@ printf '%s' "${KANTAINER_PORTAINER_PASSWORD}" > "${STAGING}/portainer-admin-pass
 # YAML accepts verbatim. Hand-rolled quoting is how a key with a space or a name
 # with a colon turns into a config that is valid YAML and means something other
 # than what the operator wrote.
+# Through the environment rather than `--arg`: one of the three values that pass
+# through here is the console password's hash, and an argument is visible in
+# /proc/<pid>/cmdline to anyone on this host. The environment of a process is
+# not. Same JSON string out either way.
 yaml_string() {
-    jq -Rn --arg value "$1" '$value'
+    value="$1" jq -n 'env.value'
 }
 
 # Replace every literal placeholder found in the original text in one pass.
@@ -124,10 +134,48 @@ kantainer_registries_d_yaml "${IMAGE_REF}" > "${STAGING}/kantainer-registries.ya
 
 BUTANE="${STAGING}/kantainer.bu"
 
+# The console password's readable form never enters this document
+# (SPEC.md §spec:console-password). What lands here is either the locked
+# placeholder or a hash somebody else made.
+#
+# KANTAINER_RENDER_CONSOLE_PASSWORD_HASH is the seam scripts/flash.sh hands the
+# hash through: it obtains one from the coreos-installer container it already
+# pulls, and this substitution puts it in place BEFORE butane runs - so no jq
+# patch of rendered Ignition JSON is needed, on a host or in a container that
+# has none, and a $6$ string full of $ characters never goes through a
+# substitution that would reinterpret them.
+#
+# IT IS DELIBERATELY NOT ONE OF config-lib.sh's KANTAINER_FIELDS, so no
+# configuration file can reach it - which is what keeps `just render`
+# containerless, deterministic and byte-identical between Linux and macOS. A $6$
+# hash has a random salt, and scripts/test-operator-config-compat.sh compares
+# those bytes.
+#
+# An environment variable is inherited, though, so the Justfile's `render` recipe
+# CLEARS it rather than trusting that nobody exported it. Keeping that promise is
+# the recipe's job, not this file's: here the rule is simply that a hash supplied
+# is a hash used.
+#
+# `*` when no hash was supplied: crypt's own "no password will ever match this
+# account", so a document that somehow reaches a machine unsubstituted leaves a
+# locked account rather than an unknown credential.
+#
+# Blank console password substitutes to the empty string whatever the seam says,
+# so a machine without one renders exactly what it rendered before this field
+# existed.
+if [[ -z "${KANTAINER_CONSOLE_PASSWORD}" ]]; then
+    CONSOLE_PASSWORD_HASH=""
+elif [[ -n "${KANTAINER_RENDER_CONSOLE_PASSWORD_HASH-}" ]]; then
+    CONSOLE_PASSWORD_HASH=$'\n      password_hash: '"$(yaml_string "${KANTAINER_RENDER_CONSOLE_PASSWORD_HASH}")"
+else
+    CONSOLE_PASSWORD_HASH=$'\n      password_hash: "*"'
+fi
+
 template="$(< "${REPO_ROOT}/butane/kantainer.bu.tmpl")"
 template="$(fill "${template}" \
     "@@USERNAME@@" "$(yaml_string "${KANTAINER_USERNAME}")" \
     "@@SSH_PUBLIC_KEY@@" "$(yaml_string "${KANTAINER_SSH_PUBLIC_KEY}")" \
+    "@@CONSOLE_PASSWORD_HASH@@" "${CONSOLE_PASSWORD_HASH}" \
     "@@ATTACH_IMAGE@@" "${ATTACH_IMAGE}")"
 printf '%s\n' "${template}" > "${BUTANE}"
 

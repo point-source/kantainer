@@ -25,6 +25,7 @@ mkdir -p "${ARTIFACTS}"
 LITERALS=$'\'"&\\\t $`@@ATTACH_IMAGE@@@@SSID@@@@PSK@@'
 SSH_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHzks6d0NfXm47Zsj5rtshvfBUn5TjFUVrULCLNug5cu fixture ${LITERALS}"
 PASSWORD="portainer-test-${LITERALS}"
+CONSOLE_PASSWORD="console-test-${LITERALS}"
 SSID="network-${LITERALS}"
 PASSPHRASE="wireless-${LITERALS}"
 
@@ -36,6 +37,7 @@ printf '%s\n' \
     'KANTAINER_USERNAME=operator' \
     "KANTAINER_SSH_PUBLIC_KEY=${SSH_KEY}" \
     "KANTAINER_PORTAINER_PASSWORD=${PASSWORD}" \
+    "KANTAINER_CONSOLE_PASSWORD=${CONSOLE_PASSWORD}" \
     'KANTAINER_TARGET_DRIVE=' \
     "KANTAINER_WIFI_SSID=${SSID}" \
     "KANTAINER_WIFI_PASSPHRASE=${PASSPHRASE}" \
@@ -62,6 +64,48 @@ if [[ "${rendered_key}" != "${SSH_KEY}" ]]; then
     exit 1
 fi
 echo "ok       - just render preserves literal and placeholder-shaped text"
+
+# SPEC.md §spec:console-password: `just flash` makes the hash, in a container,
+# and `just render` never does. THIS TEST IS THE REASON. It byte-compares the
+# rendered bytes between Linux and macOS, and a $6$ hash carries a random salt
+# that would differ on every run. So what the render carries is the locked
+# placeholder, on both hosts, and the artifacts stay comparable.
+#
+# The outcome strings below are part of those compared bytes. Both hosts run
+# this same script in the same CI run, so rewording one is safe - but reword it
+# in one place only, or the comparison fails for a reason that has nothing to do
+# with portability.
+rendered_hash="$(jq -r '.passwd.users[0].passwordHash' < "${RENDERED}")"
+if [[ "${rendered_hash}" != "*" ]]; then
+    echo "NOT OK   - just render carried something other than the locked placeholder" >&2
+    exit 1
+fi
+if grep -Fq "${CONSOLE_PASSWORD}" "${RENDERED}"; then
+    echo "NOT OK   - just render put the console password into the machine specification" >&2
+    exit 1
+fi
+echo "ok       - just render leaves the locked placeholder for the flash path"
+
+# The seam `just flash` uses is an environment variable, and an environment
+# variable is inherited. The Justfile's render recipe clears it for exactly that
+# reason; without that line an exported value in the caller's shell would put a
+# salted hash into these compared bytes and break this comparison on whichever
+# host happened to have it set. Exported here deliberately, because the promise
+# is that the command's output does not depend on the shell it was run from.
+# The single quotes are the point: `$6$` is crypt's literal method marker, not an
+# expansion, and the value has to arrive verbatim to be worth asserting on.
+# shellcheck disable=SC2016
+if ! (cd "${REPO_ROOT}" && KANTAINER_RENDER_CONSOLE_PASSWORD_HASH='$6$exported$byTheCaller' \
+        just render "${VALID}") > "${WORK}/ambient.ign" 2> "${WORK}/ambient.err"; then
+    echo "NOT OK   - just render rejected the fixture with the seam exported" >&2
+    cat "${WORK}/ambient.err" >&2
+    exit 1
+fi
+if [[ "$(jq -r '.passwd.users[0].passwordHash' < "${WORK}/ambient.ign")" != "*" ]]; then
+    echo "NOT OK   - just render used a hash exported into its environment" >&2
+    exit 1
+fi
+echo "ok       - just render ignores a hash exported into its environment"
 
 cp "${VALID}" "${DUPLICATE}"
 printf '%s\n' 'KANTAINER_TARGET_DRIVE=/dev/nvme0n1' >> "${DUPLICATE}"
@@ -93,6 +137,7 @@ cp "${VALID}" "${ARTIFACTS}/operator.conf"
 printf '%s\n' \
     'config-check valid: accepted' \
     'render valid: accepted' \
+    'render console password: locked placeholder, hashed by the flash path' \
     'config-check empty-first duplicate: refused' \
     'render empty-first duplicate: refused without output' \
     > "${ARTIFACTS}/outcomes.txt"

@@ -247,6 +247,25 @@ systemctl enable greenboot-healthcheck.service
 # This unit puts it there. See the script for the whole reasoning.
 systemctl enable kantainer-greenboot-grub.service
 
+# The login screen's address lines (SPEC.md §spec:console-display). This is the
+# boot-time run; the NetworkManager dispatcher restarts the same unit on every
+# link and address change afterwards. Enabling it is what makes the block appear
+# on a machine that boots onto a network and is never touched again - and
+# nothing about it waits for a monitor, a login, or a person.
+systemctl enable kantainer-console-network.service
+
+# The login screen's Portainer lines (SPEC.md §spec:console-display). THE TIMER
+# IS WHAT GETS ENABLED, not kantainer-portainer-probe.service: the service looks
+# once, and enabling it instead would freeze the port statement at whatever was
+# true thirty seconds into the boot. The probe's own ExecStartPost is what
+# redraws the screen afterwards.
+systemctl enable kantainer-portainer-probe.timer
+
+# The renderer also runs at boot, so the block is on the screen before the first
+# probe lands - saying the port has not been checked yet rather than saying
+# nothing. Afterwards it is restarted by the probe and by Portainer's own drop-in.
+systemctl enable kantainer-console-portainer.service
+
 # The rollback trigger arrives by IMPLICATION, through greenboot's `Also=`, and
 # no exit status above reports it. If greenboot ever dropped that line, the
 # enable would still succeed and the machine would run the health check, report
@@ -257,6 +276,25 @@ test -L /etc/systemd/system/ostree-finalize-staged.service.requires/greenboot-se
 # mode that did not survive the copy would leave a machine with no health check
 # and nothing anywhere saying so.
 test -x /usr/lib/greenboot/check/required.d/50_docker_active.sh
+
+# NetworkManager does the same thing with a dispatcher script whose mode is
+# wrong: it skips it silently. The machine would boot, write the block once, and
+# then never update it again - and the screen would look right to anyone who did
+# not move the machine to another network. systemd would at least fail the unit
+# if the generator were not executable, but neither failure is one the build log
+# would otherwise show.
+test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
+test -x /usr/libexec/kantainer/console-network-snippet
+test -x /usr/libexec/kantainer/portainer-probe
+test -x /usr/libexec/kantainer/console-portainer-snippet
+
+# curl is what makes the port statement a statement about HTTPS rather than
+# about a TCP connect (SPEC.md §spec:console-display). It comes from the base
+# image, and if it ever stopped coming the probe would not crash - it would
+# report a closed port on a perfectly healthy machine, which is the screen lying
+# in the one direction that sends an operator chasing a fault that is not there.
+# Nothing else here would notice. Fail the build instead, where it is decidable.
+test -x /usr/bin/curl
 
 ### 4. Cleanup
 #

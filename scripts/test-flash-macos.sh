@@ -45,6 +45,15 @@ ssh-keygen -q -t ed25519 -N '' -f "${WORK}/id" -C kantainer-macos-flash-test < /
     echo "KANTAINER_PORTAINER_PASSWORD=portable-test-password"
 } > "${WORK}/operator.conf"
 
+# The same machine with a console password. `just flash` has to convert it on
+# this host before it writes anything (SPEC.md §spec:console-password), so this
+# config is what drives the container call the fixtures below answer.
+CONSOLE_PASSWORD="console-test-password"
+{
+    cat "${WORK}/operator.conf"
+    echo "KANTAINER_CONSOLE_PASSWORD=${CONSOLE_PASSWORD}"
+} > "${WORK}/console.conf"
+
 BIN="${WORK}/bin"
 mkdir -p "${BIN}"
 
@@ -124,6 +133,13 @@ printf '%s\n' \
     '    exit' \
     'fi' \
     '[[ "$1" == "run" ]] || exit 2' \
+    'for arg in "$@"; do' \
+    '    [[ "${arg}" == "--entrypoint" ]] || continue' \
+    '    cat > "${FIXTURE_HASH_STDIN}"' \
+    '    [[ -z "${FIXTURE_DOCKER_HASH_FAIL-}" ]] || exit 1' \
+    '    printf "%s\n" "${FIXTURE_HASH_OUTPUT}"' \
+    '    exit 0' \
+    'done' \
     'out=""' \
     'while [[ "$#" -gt 0 ]]; do' \
     '    if [[ "$1" == "--volume" && "$2" == *:/out:rw ]]; then' \
@@ -151,6 +167,13 @@ printf '%s\n' \
     '    exit' \
     'fi' \
     '[[ "$1" == "run" ]] || exit 2' \
+    'for arg in "$@"; do' \
+    '    [[ "${arg}" == "--entrypoint" ]] || continue' \
+    '    cat > "${FIXTURE_HASH_STDIN}"' \
+    '    [[ -z "${FIXTURE_PODMAN_HASH_FAIL-}" ]] || exit 1' \
+    '    printf "%s\n" "${FIXTURE_HASH_OUTPUT}"' \
+    '    exit 0' \
+    'done' \
     'out=""' \
     'while [[ "$#" -gt 0 ]]; do' \
     '    if [[ "$1" == "--volume" && "$2" == *:/out:rw ]]; then' \
@@ -230,6 +253,12 @@ chmod +x "${BIN}"/*
 EVENT_LOG="${WORK}/events.log"
 INFO_COUNT="${WORK}/info-count"
 WRITE_CAPTURE="${WORK}/written-installer.iso"
+# What the fake runtimes were handed on stdin for the hash run, and what they
+# hand back. A fixed hash rather than a real one: a $6$ salt is random and these
+# assertions are exact.
+HASH_STDIN="${WORK}/hash-stdin"
+# shellcheck disable=SC2016  # `$6$` is crypt's literal method marker
+FIXTURE_HASH_VALUE='$6$fixturesalt00000$fixtureHASHvalue0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567'
 ALIGNED_EXPECTED="${WORK}/aligned-installer.iso"
 UNALIGNED_EXPECTED="${WORK}/unaligned-installer.iso"
 FIXTURE_PATH="${BIN}:${PATH}"
@@ -243,6 +272,9 @@ FIXTURE_UNALIGNED=""
 FIXTURE_PODMAN_FAIL=""
 FIXTURE_PODMAN_USABLE="1"
 FIXTURE_MACOS_VERSION="26.0"
+FIXTURE_DOCKER_HASH_FAIL=""
+FIXTURE_PODMAN_HASH_FAIL=""
+FIXTURE_CONFIG="${WORK}/operator.conf"
 
 i=0
 while [[ "${i}" -lt 4096 ]]; do
@@ -264,7 +296,10 @@ fi
 
 reset_fixture() {
     : > "${EVENT_LOG}"
-    rm -f "${INFO_COUNT}" "${WRITE_CAPTURE}"
+    rm -f "${INFO_COUNT}" "${WRITE_CAPTURE}" "${HASH_STDIN}"
+    FIXTURE_DOCKER_HASH_FAIL=""
+    FIXTURE_PODMAN_HASH_FAIL=""
+    FIXTURE_CONFIG="${WORK}/operator.conf"
     FIXTURE_ARCH="arm64"
     FIXTURE_DOCKER_FAIL=""
     FIXTURE_DOCKER_USABLE=""
@@ -299,8 +334,12 @@ run_fixture() {
             FIXTURE_PODMAN_USABLE="${FIXTURE_PODMAN_USABLE}" \
             FIXTURE_UNALIGNED="${FIXTURE_UNALIGNED}" \
             FIXTURE_WRITE_CAPTURE="${WRITE_CAPTURE}" \
+            FIXTURE_DOCKER_HASH_FAIL="${FIXTURE_DOCKER_HASH_FAIL}" \
+            FIXTURE_PODMAN_HASH_FAIL="${FIXTURE_PODMAN_HASH_FAIL}" \
+            FIXTURE_HASH_OUTPUT="${FIXTURE_HASH_VALUE}" \
+            FIXTURE_HASH_STDIN="${HASH_STDIN}" \
             TMPDIR="${WORK}" \
-            just flash "${device}" "${WORK}/operator.conf"
+            just flash "${device}" "${FIXTURE_CONFIG}"
     )
 }
 
@@ -549,6 +588,131 @@ elif grep -qF 'Podman could not personalise the installer' "${WORK}/linux-podman
     ok "Linux Podman failure stops before mutation without a retry prompt"
 else
     not_ok "Linux Podman failure stops before mutation without a retry prompt"
+fi
+
+### the console password, converted on THIS host before anything is written
+
+# SPEC.md §spec:console-password. The conversion happens here, in the
+# coreos-installer container `just flash` already pulls, so no readable console
+# password ever reaches the stick. Everything below drives the real flash path
+# with the fake runtimes answering the hash run.
+
+reset_fixture
+FIXTURE_CONFIG="${WORK}/console.conf"
+FIXTURE_DOCKER_USABLE="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/hash.out" 2> "${WORK}/hash.err" &&
+    hash_command="$(grep -m 1 '^docker run .*--entrypoint' "${EVENT_LOG}")" &&
+    [[ "${hash_command}" == *" --entrypoint bash "* ]] &&
+    [[ "${hash_command}" == *" ${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST} "* ]] &&
+    [[ "${hash_command}" != *" --volume "* ]]; then
+    ok "hashes the console password in the image the flash command already pulls"
+else
+    not_ok "hashes the console password in the image the flash command already pulls"
+    cat "${WORK}/hash.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+# The promise that the readable password reaches no artifact starts here: it
+# goes in on stdin, never in an argument, because /proc/<pid>/cmdline is
+# readable by anyone on the host while /proc/<pid>/environ is not.
+if [[ "$(cat "${HASH_STDIN}")" == "${CONSOLE_PASSWORD}" ]] &&
+    ! grep -qF "${CONSOLE_PASSWORD}" "${EVENT_LOG}"; then
+    ok "hands the password on stdin and puts it in no command line"
+else
+    not_ok "hands the password on stdin and puts it in no command line"
+fi
+
+# Before the installer is fetched and before the ISO is built. A conversion that
+# cannot happen costs the operator nothing if it is discovered here.
+#
+# Matched against the checksum rather than curl: fetch-installer.sh verifies the
+# cached ISO on every run but only downloads when the cache is cold, and an
+# earlier case in this file has already warmed it.
+hash_line="$(grep -n -m 1 -- '--entrypoint' "${EVENT_LOG}" | cut -d: -f1 || true)"
+fetch_line="$(grep -nE -m 1 '^(sha256sum|shasum|curl)' "${EVENT_LOG}" | cut -d: -f1 || true)"
+iso_line="$(grep -n -m 1 '^docker run .*iso customize' "${EVENT_LOG}" | cut -d: -f1 || true)"
+if [[ -n "${hash_line}" && -n "${fetch_line}" && -n "${iso_line}" ]] &&
+    (( hash_line < fetch_line && fetch_line < iso_line )); then
+    ok "converts the password before fetching the installer or building it"
+else
+    not_ok "converts the password before fetching the installer or building it"
+    cat "${EVENT_LOG}" >&2
+fi
+
+# A machine with no console password calls no container to hash nothing.
+reset_fixture
+FIXTURE_DOCKER_USABLE="1"
+if run_fixture /dev/disk7 external $'/dev/disk7\n' \
+        > "${WORK}/nohash.out" 2> "${WORK}/nohash.err" &&
+    ! grep -q -- '--entrypoint' "${EVENT_LOG}" &&
+    [[ ! -e "${HASH_STDIN}" ]] &&
+    grep -q '^sync$' "${EVENT_LOG}"; then
+    ok "a blank console password runs no conversion at all"
+else
+    not_ok "a blank console password runs no conversion at all"
+    cat "${WORK}/nohash.err" >&2
+fi
+
+# The failure §spec:console-password moves onto this host: it stops here, says
+# so, and writes no stick. Linux, where Podman is the only runtime and there is
+# no retry to offer.
+reset_fixture
+FIXTURE_CONFIG="${WORK}/console.conf"
+FIXTURE_PODMAN_USABLE="1"
+FIXTURE_PODMAN_HASH_FAIL="1"
+if run_fixture /dev/sdb external $'/dev/sdb\n' Linux \
+        > "${WORK}/hashfail.out" 2> "${WORK}/hashfail.err"; then
+    not_ok "a failed conversion stops the command"
+elif grep -qF 'console password' "${WORK}/hashfail.err" &&
+    ! grep -q '^curl$' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "a failed conversion stops before the download and writes no stick"
+else
+    not_ok "a failed conversion stops before the download and writes no stick"
+    cat "${WORK}/hashfail.err" >&2
+fi
+
+# REQUIREMENTS.md §req:constraints: "a failed Docker attempt never falls back to
+# Podman without the operator choosing that retry". That applies to this step
+# too, or a Mac operator whose Docker cannot run a container loses a path the
+# specification gives them.
+reset_fixture
+FIXTURE_CONFIG="${WORK}/console.conf"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_DOCKER_HASH_FAIL="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external $'podman\n/dev/disk7\n' \
+        > "${WORK}/hashretry.out" 2> "${WORK}/hashretry.err" &&
+    grep -qF 'Type podman to retry with Podman' "${WORK}/hashretry.err" &&
+    grep -q '^docker run .*--entrypoint' "${EVENT_LOG}" &&
+    grep -q '^podman run .*--entrypoint' "${EVENT_LOG}" &&
+    grep -q '^podman run .*iso customize' "${EVENT_LOG}" &&
+    ! grep -q '^docker run .*iso customize' "${EVENT_LOG}" &&
+    grep -q '^sync$' "${EVENT_LOG}"; then
+    ok "an accepted Podman retry converts and then builds with Podman"
+else
+    not_ok "an accepted Podman retry converts and then builds with Podman"
+    cat "${WORK}/hashretry.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+# Declined, and nothing was written.
+reset_fixture
+FIXTURE_CONFIG="${WORK}/console.conf"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_DOCKER_HASH_FAIL="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external $'no\n' \
+        > "${WORK}/hashdecline.out" 2> "${WORK}/hashdecline.err"; then
+    not_ok "a declined Podman retry stops the conversion"
+elif grep -qF 'Nothing was written to /dev/disk7' "${WORK}/hashdecline.err" &&
+    ! grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "a declined Podman retry writes no stick"
+else
+    not_ok "a declined Podman retry writes no stick"
+    cat "${WORK}/hashdecline.err" >&2
 fi
 
 reset_fixture

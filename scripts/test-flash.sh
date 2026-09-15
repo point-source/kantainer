@@ -438,6 +438,103 @@ else
     fi
 fi
 
+### the console password's conversion, on this host
+
+# SPEC.md §spec:console-password. `just flash` turns the readable password into
+# its stored form in the coreos-installer container it already pulls, so that no
+# readable console password ever reaches the stick. The runtime is replaced here:
+# the real call is the one thing in this command that needs a container.
+
+CONSOLE_LOG="${WORK}/console-runtime.log"
+# Every character the configuration file promises to take literally, because the
+# password reaches the container exactly as the operator typed it.
+# shellcheck disable=SC2016  # the literals under test, not expansions
+FLASH_CONSOLE_PASSWORD='console-secret-$`"'"'"'\ &|%:x'
+# shellcheck disable=SC2016  # `$6$` is crypt's literal method marker
+FLASH_FIXTURE_HASH='$6$fixturesalt00000$fixtureHASHvalue0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567'
+# The single quotes are the point: `$6$` is crypt's literal method marker,
+# not an expansion.
+# shellcheck disable=SC2016
+FLASH_TRUNCATED_HASH='$6$fixturesalt00000$tooShort'
+
+# Stands in for podman/docker. Records every argument and what arrived on stdin,
+# so the test can assert the password went in through one and not the other.
+fake_runtime() {
+    printf '%s\n' "$*" >> "${CONSOLE_LOG}"
+    cat > "${WORK}/console-stdin"
+    case "${FAKE_RUNTIME_MODE-}" in
+        fail) return 1 ;;
+        garbage) printf 'useradd: cannot open /etc/passwd\n' ;;
+        empty) ;;
+        # Starts like a hash and is not one; a prefix check passes it and
+        # installs a machine nobody can log in to.
+        truncated) printf '%s\n' "${FLASH_TRUNCATED_HASH}" ;;
+        # A good hash with a second line after it. cut(1) would hand both on.
+        extra) printf '%s\n%s\n' "${FLASH_FIXTURE_HASH}" 'and another line' ;;
+        *) printf '%s\n' "${FLASH_FIXTURE_HASH}" ;;
+    esac
+}
+
+# Read by the function under test, which sourcing put in this shell.
+# shellcheck disable=SC2034
+KANTAINER_CONSOLE_PASSWORD="${FLASH_CONSOLE_PASSWORD}"
+: > "${CONSOLE_LOG}"
+FAKE_RUNTIME_MODE=""
+
+if hash="$(kantainer_hash_console_password fake_runtime)" &&
+    [[ "${hash}" == "${FLASH_FIXTURE_HASH}" ]]; then
+    ok "returns the stored form the container produced"
+else
+    not_ok "returns the stored form the container produced (got: ${hash:-none})"
+fi
+
+# THE WHOLE POINT OF stdin. /proc/<pid>/cmdline is readable by anyone on this
+# host; the password has no business in an argument.
+if [[ "$(cat "${WORK}/console-stdin")" == "${FLASH_CONSOLE_PASSWORD}" ]]; then
+    ok "hands the password to the container on stdin, byte for byte"
+else
+    not_ok "hands the password to the container on stdin, byte for byte"
+fi
+
+if grep -Fq "${FLASH_CONSOLE_PASSWORD}" "${CONSOLE_LOG}"; then
+    not_ok "puts the password in no command-line argument"
+else
+    ok "puts the password in no command-line argument"
+fi
+
+# The image is the one versions.env already pins for the ISO build, by digest.
+# A second image would be a second thing for a Mac operator to pull.
+if grep -Fq "${COREOS_INSTALLER_IMAGE}@${COREOS_INSTALLER_DIGEST}" "${CONSOLE_LOG}" &&
+    grep -Fq -- "--entrypoint bash" "${CONSOLE_LOG}"; then
+    ok "runs the pinned installer image, with bash rather than its entrypoint"
+else
+    not_ok "runs the pinned installer image, with bash rather than its entrypoint"
+    cat "${CONSOLE_LOG}" >&2
+fi
+
+# A container that cannot hash must not be mistaken for one that returned
+# nothing to hash: the operator asked for a console password and must not get a
+# stick that quietly has none.
+FAKE_RUNTIME_MODE="fail"
+if ( kantainer_hash_console_password fake_runtime ) > /dev/null 2>&1; then
+    not_ok "refuses when the container call fails"
+else
+    ok "refuses when the container call fails"
+fi
+
+# Shadow-utils is someone else's tool and its output shape is theirs to change.
+# The check is on the form we need, not on how they got there: anything that is
+# not a SHA-512 crypt hash would install a machine nobody can log in to, found
+# out months later with a keyboard in hand.
+for FAKE_RUNTIME_MODE in garbage empty truncated extra; do
+    if ( kantainer_hash_console_password fake_runtime ) > /dev/null 2>&1; then
+        not_ok "refuses a ${FAKE_RUNTIME_MODE} answer that is not a stored password"
+    else
+        ok "refuses a ${FAKE_RUNTIME_MODE} answer that is not a stored password"
+    fi
+done
+FAKE_RUNTIME_MODE=""
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all flash checks behave as intended"

@@ -1,0 +1,49 @@
+#!/bin/bash
+# Rewrite the login screen when the network changes
+# (SPEC.md §spec:console-display).
+#
+# §req:sc:screen-keeps-up: attaching a cable, joining a network, or a new
+# address arriving from the router is reflected on the screen without a reboot
+# and without anyone logging in. NetworkManager is what knows those things
+# happened, and a dispatcher script is how it says so.
+#
+# THIS SCRIPT DOES NOT GENERATE ANYTHING, and that is the point. Dispatcher
+# scripts here run one at a time, and one that runs too long is killed. The
+# generator asks NetworkManager for the machine's devices over D-Bus, so running
+# it inline would hold every other dispatcher script on the machine behind a
+# round trip to the service that just called us - and be killed mid-write if
+# that service is busy. NetworkManager's own process does not block on us
+# (up, down and dhcp*-change are dispatched asynchronously; only pre-up and
+# pre-down make it wait), so the cost is to the queue, not to the network.
+# Handing the work to systemd puts it outside that queue entirely.
+#
+# `restart`, not `start`: systemd satisfies a start request with a job that is
+# already queued, so a burst of events - which is what plugging in a cable
+# actually produces - could drop the last one. The last one is the one that
+# describes where the machine ended up.
+#
+# WHY dhcp4-change AND dhcp6-change. The platform's own dispatcher handles only
+# up and down, and does not need more: its line is an agetty escape that agetty
+# re-expands from the kernel every time it draws. Ours holds a literal address,
+# so a renewed lease that changes the address reaches the screen only through
+# these events.
+#
+# This lives in /usr/lib rather than /etc for the same reason the firewall zone
+# does: it belongs to the image, and an operator can shadow it by name in /etc
+# without their change and the image fighting each other.
+
+# NetworkManager passes the interface as $1 and the event as $2. The interface
+# is not used: the generator re-reads every device anyway, because a cable going
+# down changes which OTHER device the machine should be reached on.
+action="${2-}"
+
+case "${action}" in
+    up|down|dhcp4-change|dhcp6-change)
+        systemctl restart --no-block kantainer-console-network.service
+        ;;
+esac
+
+# Never fail. A non-zero exit here is logged by NetworkManager against an event
+# that has nothing to do with this display, and nothing above this line is worth
+# reporting a network failure for.
+exit 0
