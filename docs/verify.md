@@ -72,6 +72,47 @@ That is a machine that is up and has nowhere to be reached yet — usually a cab
 a first boot before the router has answered. Docker's own networks never appear here; they are
 addresses the machine talks to itself on, not ones you can reach it at.
 
+**Below the address lines, the screen says what it knows about Portainer.** Two lines:
+
+```
+Portainer service: active
+Portainer port 9443: answering (checked 2026-09-15 14:03:11+01:00)
+```
+
+**Those are two separate statements, on purpose, and they can disagree.** The first is what the
+machine's own service manager says. The second is the result of actually opening an HTTPS
+connection to port 9443 and seeing whether anything answered.
+
+On a working machine they agree and you can stop reading. When they disagree, **the disagreement
+is the information** — the screen shows you both rather than picking one:
+
+```
+Portainer service: active
+Portainer port 9443: no answer (checked 2026-09-15 14:03:11+01:00)
+```
+
+That is a Portainer that started and then stopped serving. The machine thinks it is running,
+because the container is still there; your browser disagrees, because nothing answers. It is the
+reason you walked over to the machine, and it is the one case a single "Portainer: running" line
+would have got wrong. Go to [When Portainer does not
+answer](#when-portainer-does-not-answer).
+
+The reverse disagreement — `failed` with a port that answers — means the unit gave up while
+something is still listening. Same page.
+
+**The time in brackets is when the port was last asked, and the machine asks once a minute.** So
+that line can be up to a minute behind reality; the timestamp is there so you can tell how far.
+The service line is not on a timer — it changes the moment Portainer starts, stops or fails. Right
+after you restart Portainer, the two lines disagreeing for a few seconds is the port line catching
+up, not a fault.
+
+Until the first check lands, a few seconds into the boot, the line reads `not checked yet`. That
+is not a failure — it means nobody has asked yet.
+
+**The port is checked from the machine itself.** So `answering` means Portainer is serving; it
+does not promise that your network path to it is open. If the screen says `answering` and your
+browser still cannot reach it, the problem is between you and the machine, not on it.
+
 **This display only exists once the machine is running its own image.** During the installation
 and during the window in which it downloads that image, the screen is whatever stock Fedora
 CoreOS shows. If you are watching an early boot and see no kantainer line, read [When Portainer
@@ -281,6 +322,18 @@ systemctl status kantainer-portainer.service        # Portainer itself
 journalctl -u kantainer-portainer.service -b
 docker ps
 ```
+
+**If the login screen showed the two Portainer lines disagreeing, start with `docker ps`.** A
+service the machine calls `active` whose port does not answer is a container that is still there
+and no longer serving — the journal for `kantainer-portainer.service` usually says what it hit.
+Restarting it is the first thing to try:
+
+```bash
+systemctl restart kantainer-portainer.service
+```
+
+Watch the login screen afterwards if you have a monitor on it: the service line moves
+immediately, and the port line follows within a minute.
 
 Two of these are built to explain themselves rather than fail quietly:
 
