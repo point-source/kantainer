@@ -218,23 +218,27 @@ Cites §req:success-criteria (1, 15, 16, 17, 19), §req:user-stories,
 
 ## Machine configuration §spec:machine-configuration
 
-*Status: complete* — `kantainer.conf.example` carries the template and `just config-check`
-applies the rules below. `just flash` (see §spec:installer-media) wraps the same check.
+*Status: complete, except the optional console password* — `kantainer.conf.example` carries
+the template and `just config-check` applies the rules below. `just flash` (see
+§spec:installer-media) wraps the same check. The console password named below is specified
+in §spec:console-password and is not started.
 
 The repository carries a configuration template. The operator copies it, fills it in, and
 keeps their copy out of version control. It is the only place machine-specific values
 exist. `kantainer.conf.example` is the authoritative list of what it carries: a login
 account, an SSH public key and the Portainer administrator password are required; a target
-drive and a wireless network name and passphrase are optional.
+drive, a wireless network name and passphrase, and a console password are optional.
 
 The file is parsed rather than executed, and each value is taken literally to the end of its
 line. The operator is not asked to learn shell quoting for a password.
 
 Validation refuses when a required value is missing, when the SSH public key is not one, or
-when the Portainer password is shorter than the length Portainer itself will accept without
-demanding an immediate change. The refusal names the offending field and exits non-zero.
-Nothing is written — not a USB stick, not a rendered configuration, not a temporary file
-left behind.
+when either password is shorter than the twelve characters Portainer itself will accept
+without demanding an immediate change. The refusal names the offending field and exits
+non-zero. Nothing is written — not a USB stick, not a rendered configuration, not a temporary
+file left behind. The console password is the one field whose absence is reported rather than
+refused: a machine without one is a supported choice, and the check says what that choice
+costs (§spec:console-password).
 
 **Decision and constraint.** The Portainer password is required rather than optional, which
 departs from §req:success-criteria item 4 and §req:priorities, where it ranks fifth as
@@ -485,6 +489,165 @@ physical access and a reinstall as the only recovery. For a machine whose entire
 configuration lives in a file the operator already keeps, reinstalling is cheap.
 
 Cites §req:success-criteria (10), §req:quality-attributes, §req:constraints.
+
+## Console display §spec:console-display
+
+*Status: not started*
+
+With a monitor attached, the machine's login screen answers the two questions an operator
+standing at it has: what to type into a browser, and whether Portainer is there. It answers
+them before anyone logs in, and it does not require a keyboard to have been used.
+
+Below what the platform already prints, the screen carries a kantainer block. For each
+network the machine is actually on, the block gives the machine's address written the way it
+is typed into a browser to reach Portainer, and the name of that network — the wireless
+network the machine joined, or that the connection is wired. When the machine has no address
+at all, the block says exactly that in words, rather than leaving a space where an address
+would be.
+
+Portainer is reported as two separate statements: what the machine's service manager says
+about it, and whether an HTTPS connection to its port was actually answered, together with
+when that was last checked. On a healthy machine the two agree. When they disagree, the
+screen shows the disagreement rather than choosing one.
+
+The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a
+new address arriving from the router, and Portainer starting, stopping or failing are all
+reflected on the screen without a reboot and without anyone logging in. The platform's own
+per-interface line is refreshed from the same events, so it cannot sit stale next to a
+correct kantainer line. The answered-on-its-port statement refreshes on its own schedule and
+says when it last looked.
+
+This display exists only on a machine that is running its own image. During installation and
+during the window in which the machine downloads that image, the screen is whatever stock
+Fedora CoreOS shows.
+
+**Decision and constraint.** §req:success-criteria items 19, 20 and 21 and
+§req:quality-attributes' console visibility require this, and §req:priorities ranks it fourth
+because it takes the router out of the first-boot path — which matters most on exactly the
+networks the operator does not administer. It is read-only and cannot lock anyone out, which
+is why it ranks above the console password.
+
+The display extends the platform's existing console message machinery rather than replacing
+it. That machinery is already in the base image, already enumerates network interfaces,
+already redraws the login prompt the instant a cable goes up or down, and already survives
+updates as part of the platform. Writing a display of our own would reproduce all of it in
+order to add three lines.
+
+The operator chose to keep the platform's own per-interface line and add the kantainer block
+beneath it, so that the platform's part keeps working if ours breaks. For the cheapest safety
+in the project, degrading is the right failure mode: a screen that shows an address in the
+platform's shape is worth more than a blank one.
+
+Portainer is reported twice, at the operator's direction, because an operator is at the
+keyboard precisely when the web page did not load — the one case where a container that
+started and then wedged reads as running. A screen that agreed with the machine rather than
+with the operator would be wrong exactly when it is being read.
+
+Nothing here may be on the zero-touch path. §req:constraints says the machine has a screen
+and a keyboard only when the operator attaches them, so the block is produced whether or not
+anything is displaying it, and nothing waits for a display, a login, or a person.
+
+**Alternatives rejected.** Replacing the platform's per-interface line with a single
+kantainer-authored block was offered and rejected by the operator: it reads better, but it
+makes the whole screen ours to break, and a fault in it leaves nothing where the platform
+would still have shown an address. Removing the SSH host key fingerprints the platform prints
+was rejected with it — they are the only way to verify this host on a first SSH connection.
+Reporting Portainer from the service manager alone was rejected as agreeing with the machine
+in the one case that brings an operator to the keyboard; probing the port alone was rejected
+as unable to tell a stopped Portainer from a wedged one. Carrying the display through the
+install and download window was rejected as scope beyond the requirement; docs/verify.md
+already explains that window in prose (§spec:operator-documentation). A status dashboard or a
+custom program on the console was rejected outright: §req:quality-attributes promises the
+console is ordinary, with no menu and no recovery tool.
+
+**Tradeoffs.** The address appears twice on the screen in two different shapes, and on a
+machine whose interface came up without an address the platform's line may sit above the
+kantainer block with nothing after it. Both are the accepted cost of not owning the platform's
+part. Something knocks on Portainer's port on a schedule for the life of the machine, so the
+screen lags reality by up to that interval — which is why it says when it last looked. The
+block's position on the screen depends on the platform's own snippets, so a change there moves
+ours. Anyone standing at the machine learns its address and that Portainer is running; that
+requires physical presence, the address is not a secret to anyone already on that network, and
+the Portainer password remains the whole of the defence (§spec:portainer-service).
+
+Cites §req:success-criteria (19, 20, 21), §req:quality-attributes, §req:priorities,
+§req:constraints.
+
+## Console password §spec:console-password
+
+*Status: not started*
+
+The configuration file carries an optional console password for the machine's login account.
+
+Left blank, the machine is exactly what it is today: no account has a password, the login
+prompt cannot be satisfied by anyone, and the SSH key is the only way in. Set, the operator
+can log in at the machine's own keyboard with the account name and that password, and can
+administer the machine from that session.
+
+The password never reaches the network. SSH refuses password authentication for every
+account whether or not a console password is set (§spec:remote-access), so setting one widens
+physical access and nothing else.
+
+The configuration check refuses a console password shorter than twelve characters, names the
+field, and writes nothing — the same floor, for the same reason, as the Portainer password
+(§spec:machine-configuration). A blank one is accepted rather than refused, and the check says
+plainly that a machine without one cannot be reached at all once its network fails, so that
+the operator declines the insurance knowingly rather than discovering it later with a keyboard
+in their hand.
+
+After installation the password exists on the machine only in its own account database.
+Nothing in kantainer writes a second readable copy onto the installed machine.
+
+**Decision and constraint.** §req:success-criteria items 22 to 25 require this, and
+§req:priorities ranks it fifth: insurance rather than daily use, off unless the operator asks
+for it, and it must leave the default posture exactly as locked down as it is today. That last
+clause is why the field is optional and why nothing about a machine with a blank one changes.
+
+The operator writes the password in readable form, at their direction, the same way they write
+the Portainer password. The configuration file's whole design is one literal value per line
+with no syntax to learn, and it already carries a secret that owns the machine — the USB stick
+is already an object whose loss costs a reflash and a rotated Portainer password. A second
+readable secret beside the first does not change that cost.
+
+The password is converted into its stored form by the machine during installation rather than
+by the operator's host, because the supported operator hosts do not agree on a tool that can do
+it. The Bash and the OpenSSL that macOS 26 ships cannot produce the modern form, and
+§req:constraints forbids requiring a Mac operator to install anything extra. The machine can,
+and the machine is where the value is needed.
+
+Privileged commands do not ask for the password again. The base platform already grants this
+account administrative rights without a prompt, which is how key-based administration over SSH
+works today; requiring a password would leave a machine with no console password unable to
+administer itself at all, contradicting §spec:remote-access. The login prompt is therefore the
+whole of the gate, which is what makes the twelve-character floor load-bearing rather than
+ceremonial.
+
+**Alternatives rejected.** Having the operator supply a pre-scrambled password was offered and
+rejected: it keeps the readable form off the stick, but macOS ships no tool that produces the
+strong form, so it would either push Mac operators onto a weak one or break the macOS support
+§spec:operator-host-support exists to provide. Accepting either form was rejected as two paths
+to get wrong in a file whose value is the absence of syntax. Making the console password
+required was rejected by §req:constraints, which makes blank a supported choice. Requiring the
+password for privileged commands was rejected because it breaks administration on every machine
+that does not set one. Logging the console in automatically, with no password, was rejected as
+strictly worse than today: it hands the machine to whoever walks up to it. A separate recovery
+account was rejected as a second identity to reason about and lock down, for no capability the
+operator's own account lacks.
+
+**Tradeoffs.** The stick carries two readable secrets instead of one. Anyone past the login
+prompt has administrative access with no further challenge, so the password's strength is the
+whole of the console defence — the same shape, and the same floor, as Portainer's. Setting one
+means the machine can be taken over by someone with physical access and the password; leaving
+it blank means a machine whose network has failed can only be reflashed. The check states that
+choice at the moment it is made. Changing the password later means rendering and reflashing,
+like every other value in the file. One thing to confirm on the first hardware run, because
+nothing in this repository can answer it: whether the installer leaves the delivered machine
+configuration readable in the installed machine's boot partition. It already carries the
+Portainer password, so the answer does not change this design, but it is the kind of fact this
+repository records rather than assumes.
+
+Cites §req:success-criteria (22, 23, 24, 25), §req:constraints, §req:quality-attributes,
+§req:priorities.
 
 ## Operating system updates §spec:os-updates
 
