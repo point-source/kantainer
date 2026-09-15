@@ -75,8 +75,12 @@ printf '%s' "${KANTAINER_PORTAINER_PASSWORD}" > "${STAGING}/portainer-admin-pass
 # YAML accepts verbatim. Hand-rolled quoting is how a key with a space or a name
 # with a colon turns into a config that is valid YAML and means something other
 # than what the operator wrote.
+# Through the environment rather than `--arg`: one of the three values that pass
+# through here is the console password's hash, and an argument is visible in
+# /proc/<pid>/cmdline to anyone on this host. The environment of a process is
+# not. Same JSON string out either way.
 yaml_string() {
-    jq -Rn --arg value "$1" '$value'
+    value="$1" jq -n 'env.value'
 }
 
 # Replace every literal placeholder found in the original text in one pass.
