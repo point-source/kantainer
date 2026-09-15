@@ -193,8 +193,8 @@ success the operator is told to eject the disk manually, and the command never e
 
 **Decision and constraint.** Erasing the wrong disk is the workflow's only unrecoverable
 failure, so ordinary macOS flashing requires positive device classification. The advanced
-path remains available because §req:success-criteria requires intentional access to other
-real device nodes. Exact-path confirmation is still necessary because device metadata cannot
+path remains available because §req:sc:macos-advanced-target requires intentional access to
+other real device nodes. Exact-path confirmation is still necessary because device metadata cannot
 distinguish an installer stick from an external backup. Buffered writes remain necessary for
 unaligned images; aligned images can safely use the faster raw interface.
 

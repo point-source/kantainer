@@ -217,16 +217,20 @@ Everything that can refuse does so **before the device is touched**, in this ord
    typo'd or ineligible path costs you nothing.
 3. The runtime is checked. Linux requires Podman. macOS uses Docker Desktop when it is usable,
    otherwise Podman.
-4. The pinned Fedora CoreOS ISO is downloaded to `output/installer/` and verified against the
+4. If you set a console password, the container scrambles it. This also runs before the download,
+   so a runtime that cannot do it costs you nothing but the time to read why — and the stick is
+   never written carrying your readable password.
+5. The pinned Fedora CoreOS ISO is downloaded to `output/installer/` and verified against the
    checksum committed in `versions.env`. A cached copy is re-verified on every run, not just when
    it was written, and a cached file that disagrees with the pin is a refusal rather than a silent
    re-download.
-5. The installer configuration is rendered into a private staging directory.
-6. The pinned `coreos-installer` container writes your account, key and password into a copy of
+6. The installer configuration is rendered into a private staging directory, carrying the
+   scrambled console password rather than the one you typed.
+7. The pinned `coreos-installer` container writes your account, key and password into a copy of
    the ISO.
 
-If Docker Desktop fails while building that copy and Podman is usable, the command names the
-Docker failure and asks:
+If Docker Desktop fails at either container step — scrambling the console password, or building
+that copy — and Podman is usable, the command names the Docker failure and asks:
 
 ```
 Type podman to retry with Podman, or anything else to stop.
