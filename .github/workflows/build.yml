@@ -143,7 +143,7 @@ jobs:
       - name: Sign image
         if: steps.gate.outputs.publish == 'true'
         env:
-          COSIGN_PASSWORD: ''
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           DIGEST: ${{ steps.push-image.outputs.digest }}
         run: |
