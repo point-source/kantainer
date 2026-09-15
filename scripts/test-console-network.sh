@@ -45,6 +45,17 @@ assert() {
     fi
 }
 
+# refute <name> <command...> - the inverse
+refute() {
+    local name="$1"
+    shift
+    if "$@" > /dev/null 2>&1; then
+        not_ok "${name}"
+    else
+        ok "${name}"
+    fi
+}
+
 # A shell file with its comment lines removed. Assertions about what a script
 # DOES have to read what it runs: every file in this batch explains itself at
 # length, and prose must not be able to satisfy a check.
@@ -60,13 +71,25 @@ code() {
 DEVICE_SHOW=""
 declare -A SSIDS=()
 
+# nmcli's terse modes escape a colon and a backslash inside a VALUE unless
+# `-e no` is given - `nmcli -g GENERAL.HWADDR` really does return
+# BC\:24\:11\:52\:A7\:C1. The stub reproduces that, so a caller that forgets
+# `-e no` sees the escaped form here exactly as it would on the machine. A stub
+# that always returned the raw value would make the escaping tests pass while
+# the screen showed a backslash the operator never typed.
 kantainer_nmcli() {
-    local last="${*: -1}"
+    local last="${*: -1}" value
     case "$*" in
-        *802-11-wireless.ssid*) printf '%s\n' "${SSIDS[${last}]-}" ;;
-        *"device show"*) printf '%s' "${DEVICE_SHOW}" ;;
+        *802-11-wireless.ssid*) value="${SSIDS[${last}]-}" ;;
+        *"device show"*) printf '%s' "${DEVICE_SHOW}"; return 0 ;;
         *) return 1 ;;
     esac
+
+    if [[ "$*" != *"-e no"* ]]; then
+        value="${value//\\/\\\\}"
+        value="${value//:/\\:}"
+    fi
+    printf '%s\n' "${value}"
 }
 
 # The block a machine in the current fixture state would show on its screen.
@@ -156,6 +179,13 @@ IP4.ADDRESS[1]:192.168.1.51/24
 SSIDS=([kantainer-wireless]='Up\Stairs')
 
 shows "a backslash in the network's name is escaped for agetty" 'Up\\Stairs'
+
+# A colon is the other character nmcli's terse mode escapes. It has no meaning
+# to agetty, so it must reach the screen exactly as the operator typed it -
+# which only happens if the SSID is read with escaping turned off.
+SSIDS=([kantainer-wireless]='Cafe:5G')
+
+shows "a colon in the network's name reaches the screen unchanged" '(wireless: Cafe:5G)'
 
 # A profile whose SSID cannot be read at all. The line says wireless and stops,
 # rather than trailing off after a colon with nothing behind it - the same rule
@@ -314,10 +344,9 @@ for action in up down dhcp4-change dhcp6-change; do
         grep -qE 'restart .*kantainer-console-network\.service' \
         <(dispatched ens18 "${action}")
 
-    # NetworkManager waits for a dispatcher script to finish. The generator
-    # talks to NetworkManager, so running it inline would be NetworkManager
-    # waiting on a script waiting on NetworkManager.
-    assert "a ${action} event does not block NetworkManager's dispatcher" \
+    # Dispatcher scripts run one at a time and are killed if they run too long,
+    # so this one must return immediately rather than wait for the generator.
+    assert "a ${action} event does not hold up the dispatcher queue" \
         grep -qF -- '--no-block' <(dispatched ens18 "${action}")
 done
 
@@ -331,16 +360,10 @@ assert "an event the block does not depend on is ignored" \
 assert "rewriting the block redraws the login prompt" \
     grep -qF 'agetty --reload' <(code "${GENERATOR}")
 
-# A deadlock here would hang NetworkManager's dispatcher queue, not just this
-# display.
-refute_nmcli() {
-    if grep -qE '(^|[^_])nmcli' <(code "${DISPATCHER}"); then
-        not_ok "the dispatcher does not call nmcli itself"
-    else
-        ok "the dispatcher does not call nmcli itself"
-    fi
-}
-refute_nmcli
+# The generator's nmcli calls belong on systemd's side of the hand-off. One
+# here would hold up every other dispatcher script on the machine.
+refute "the dispatcher does not call nmcli itself" \
+    grep -qE '(^|[^_])nmcli' <(code "${DISPATCHER}")
 
 ### Nothing on this path waits for a monitor
 
@@ -354,12 +377,16 @@ assert "the unit runs on an ordinary multi-user boot" \
     grep -qF 'WantedBy=multi-user.target' "${UNIT}"
 
 for waits_for_a_person in 'StandardInput=' 'TTYPath=' 'getty' 'graphical.target'; do
-    if grep -qF "${waits_for_a_person}" <(code "${UNIT}"); then
-        not_ok "the unit does not wait for a display (found: ${waits_for_a_person})"
-    else
-        ok "the unit does not wait for a display (${waits_for_a_person})"
-    fi
+    refute "the unit does not wait for a display (${waits_for_a_person})" \
+        grep -qF "${waits_for_a_person}" <(code "${UNIT}")
 done
+
+# The dispatcher fires far more often than systemd's default five starts per ten
+# seconds: an up and a dhcp4-change per interface, plus docker0 and a bridge for
+# every Portainer network. Without this the sixth start in a boot is refused and
+# the screen keeps whatever the last successful run wrote.
+assert "a burst of network events cannot rate-limit the block into staleness" \
+    grep -qE '^StartLimitIntervalSec=0' "${UNIT}"
 
 ### What the image ships, rather than what the renderer produces
 

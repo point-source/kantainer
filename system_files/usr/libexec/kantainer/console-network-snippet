@@ -55,11 +55,6 @@ SNIPPET_NAME=90_kantainer_network.issue
 CLHM_LIB=/usr/lib/console-login-helper-messages/libutil.sh
 CLHM_ISSUE_DEFS=/usr/lib/console-login-helper-messages/issue.defs
 
-fail() {
-    echo "console-network-snippet: $*" >&2
-    exit 1
-}
-
 # The only thing here that reads the machine. The tests replace it.
 kantainer_nmcli() {
     nmcli "$@"
@@ -74,10 +69,16 @@ kantainer_nmcli() {
 # sequence, and an SSID is whatever the operator typed into their configuration
 # file. When the SSID cannot be read at all, the line says "wireless" and stops
 # there rather than trailing off after a colon with nothing behind it.
+#
+# `-e no` matters here as much as it does on the device query. -g is terse mode,
+# which escapes a colon and a backslash in the VALUE - so an SSID of "Net:5G"
+# would arrive as "Net\:5G" and one of "Up\Stairs" as "Up\\Stairs". Escaping
+# that a second time below would put a backslash on the screen that the operator
+# never typed.
 kantainer_ssid() {
     local profile="$1" ssid=""
 
-    ssid="$(kantainer_nmcli -g 802-11-wireless.ssid connection show id "${profile}" 2> /dev/null)" ||
+    ssid="$(kantainer_nmcli -e no -g 802-11-wireless.ssid connection show id "${profile}" 2> /dev/null)" ||
         ssid=""
 
     if [[ -z "${ssid}" ]]; then
@@ -202,12 +203,12 @@ kantainer_network_block() {
 }
 
 main() {
-    [[ -r "${CLHM_LIB}" && -r "${CLHM_ISSUE_DEFS}" ]] ||
-        fail "console-login-helper-messages is missing from ${CLHM_LIB%/*}
-    It ships in the base image and owns /etc/issue.d, the atomic writer this
-    uses, and the platform's own lines on the login screen. Without it there is
-    nowhere to put the block."
-
+    # No check that these exist first. `set -e` already stops here with the
+    # missing path named, which is the same outcome a hand-written check would
+    # produce - and the condition needs a base image without
+    # console-login-helper-messages, which the digest pin in the Containerfile
+    # makes a deliberate act rather than an accident.
+    #
     # RUN_SNIPPETS and write_via_tempfile come from the platform. Its writer
     # stages the file under /run, renames it into place and relabels it, which
     # is what keeps a half-written snippet off the screen.

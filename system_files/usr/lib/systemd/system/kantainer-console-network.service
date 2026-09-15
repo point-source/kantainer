@@ -9,6 +9,20 @@ After=NetworkManager.service
 # nothing to report. Refusing to run would leave the screen with whatever the
 # last boot wrote instead.
 
+# systemd's default start limit - five starts in ten seconds - applies to
+# externally requested starts, not just Restart=. The dispatcher issues one
+# restart per network event, and a single boot produces far more than five: an
+# up and a dhcp4-change for each interface, plus docker0 and a bridge for every
+# Portainer network the operator has defined. The sixth would be refused, the
+# unit would go failed, and the screen would keep whatever the last successful
+# run wrote - usually "no network address yet", because that is what the early
+# ones write. Nothing would surface it: greenboot's default checks are
+# deliberately not installed, so a failed unit does not fail the boot.
+#
+# Rate-limiting the one thing that keeps the display honest protects nothing.
+# The work is a few nmcli calls and an atomic write.
+StartLimitIntervalSec=0
+
 [Service]
 Type=oneshot
 

@@ -7,12 +7,15 @@
 # and without anyone logging in. NetworkManager is what knows those things
 # happened, and a dispatcher script is how it says so.
 #
-# THIS SCRIPT DOES NOT GENERATE ANYTHING, and that is the point. NetworkManager
-# runs dispatcher scripts one at a time and waits for each to finish. The
-# generator asks NetworkManager for the machine's devices, so running it from
-# here would be NetworkManager waiting on a script waiting on NetworkManager -
-# with every other dispatcher script on the machine queued behind it. Handing
-# the work to systemd puts it outside that queue entirely.
+# THIS SCRIPT DOES NOT GENERATE ANYTHING, and that is the point. Dispatcher
+# scripts here run one at a time, and one that runs too long is killed. The
+# generator asks NetworkManager for the machine's devices over D-Bus, so running
+# it inline would hold every other dispatcher script on the machine behind a
+# round trip to the service that just called us - and be killed mid-write if
+# that service is busy. NetworkManager's own process does not block on us
+# (up, down and dhcp*-change are dispatched asynchronously; only pre-up and
+# pre-down make it wait), so the cost is to the queue, not to the network.
+# Handing the work to systemd puts it outside that queue entirely.
 #
 # `restart`, not `start`: systemd satisfies a start request with a job that is
 # already queued, so a burst of events - which is what plugging in a cable
