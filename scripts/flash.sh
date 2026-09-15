@@ -103,6 +103,36 @@ kantainer_personalize_installer() {
         "/iso/$(basename "${iso}")"
 }
 
+kantainer_build_installer() {
+    local host="$1" runtime="$2" iso="$3" staging="$4" device="$5" retry
+
+    if kantainer_personalize_installer "${runtime}" "${iso}" "${staging}"; then
+        return 0
+    fi
+
+    if [[ "${host}" == "Darwin" && "${runtime}" == "docker" ]]; then
+        echo "flash: Docker Desktop could not personalise the installer." >&2
+        if [[ -z "${KANTAINER_PODMAN_USABLE}" ]]; then
+            kantainer_fail "Podman is not usable. Nothing was written to ${device}."
+        fi
+
+        echo "Type podman to retry with Podman, or anything else to stop." >&2
+        read -r retry || retry=""
+        if [[ "${retry}" != "podman" ]]; then
+            kantainer_fail "Podman retry declined. Nothing was written to ${device}."
+        fi
+
+        rm -f "${staging}/installer.iso"
+        echo "flash: retrying the installer with Podman" >&2
+        if ! kantainer_personalize_installer podman "${iso}" "${staging}"; then
+            kantainer_fail "Podman could not personalise the installer. Nothing was written to ${device}."
+        fi
+        return 0
+    fi
+
+    kantainer_fail "Podman could not personalise the installer. Nothing was written to ${device}."
+}
+
 # One objective predicate for the advanced path. Tests replace this boundary;
 # ordinary selection trusts diskutil/lsblk's own verdict instead.
 kantainer_device_node_exists() {
@@ -469,7 +499,8 @@ main() {
             echo "flash: building the installer with Podman" >&2
             ;;
     esac
-    kantainer_personalize_installer "${KANTAINER_RUNTIME}" "${iso}" "${staging}"
+    kantainer_build_installer \
+        "${host}" "${KANTAINER_RUNTIME}" "${iso}" "${staging}" "${device}"
 
     kantainer_flash_device "${staging}/installer.iso" "${device}" "${mode}" "${initial_facts}"
 }

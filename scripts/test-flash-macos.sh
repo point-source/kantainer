@@ -119,6 +119,10 @@ printf '%s\n' \
     '    fi' \
     'done' \
     '[[ -n "${out}" ]] || exit 2' \
+    'if [[ -n "${FIXTURE_DOCKER_FAIL-}" ]]; then' \
+    '    printf partial > "${out}/installer.iso"' \
+    '    exit 1' \
+    'fi' \
     'i=0' \
     'while [[ "${i}" -lt 4096 ]]; do printf x; i=$(( i + 1 )); done > "${out}/installer.iso"' \
     '[[ -z "${FIXTURE_UNALIGNED-}" ]] || printf y >> "${out}/installer.iso"' \
@@ -142,6 +146,14 @@ printf '%s\n' \
     '    fi' \
     'done' \
     '[[ -n "${out}" ]] || exit 2' \
+    'if [[ -e "${out}/installer.iso" ]]; then' \
+    '    printf "podman stale-output\n" >> "${FIXTURE_EVENT_LOG}"' \
+    '    exit 3' \
+    'fi' \
+    'if [[ -n "${FIXTURE_PODMAN_FAIL-}" ]]; then' \
+    '    printf partial > "${out}/installer.iso"' \
+    '    exit 1' \
+    'fi' \
     'i=0' \
     'while [[ "${i}" -lt 4096 ]]; do printf x; i=$(( i + 1 )); done > "${out}/installer.iso"' \
     '[[ -z "${FIXTURE_UNALIGNED-}" ]] || printf y >> "${out}/installer.iso"' \
@@ -191,7 +203,9 @@ chmod +x "${BIN}"/*
 EVENT_LOG="${WORK}/events.log"
 INFO_COUNT="${WORK}/info-count"
 FIXTURE_PATH="${BIN}:${PATH}"
+FIXTURE_DOCKER_FAIL=""
 FIXTURE_DOCKER_USABLE=""
+FIXTURE_PODMAN_FAIL=""
 FIXTURE_PODMAN_USABLE="1"
 
 # fetch-installer's cache lives under the repository by design. Remove only
@@ -207,7 +221,9 @@ fi
 reset_fixture() {
     : > "${EVENT_LOG}"
     rm -f "${INFO_COUNT}"
+    FIXTURE_DOCKER_FAIL=""
     FIXTURE_DOCKER_USABLE=""
+    FIXTURE_PODMAN_FAIL=""
     FIXTURE_PODMAN_USABLE="1"
 }
 
@@ -220,9 +236,11 @@ run_fixture() {
             FIXTURE_UNAME="${host}" \
             FIXTURE_CLASS="${class}" \
             FIXTURE_CHANGE="${change}" \
+            FIXTURE_DOCKER_FAIL="${FIXTURE_DOCKER_FAIL}" \
             FIXTURE_DOCKER_USABLE="${FIXTURE_DOCKER_USABLE}" \
             FIXTURE_EVENT_LOG="${EVENT_LOG}" \
             FIXTURE_INFO_COUNT="${INFO_COUNT}" \
+            FIXTURE_PODMAN_FAIL="${FIXTURE_PODMAN_FAIL}" \
             FIXTURE_PODMAN_USABLE="${FIXTURE_PODMAN_USABLE}" \
             TMPDIR="${WORK}" \
             just flash "${device}" "${WORK}/operator.conf"
@@ -305,6 +323,97 @@ else
     not_ok "refuses macOS with no usable runtime before target mutation"
     cat "${WORK}/no-runtime.err" >&2
     cat "${EVENT_LOG}" >&2
+fi
+
+target_was_mutated() {
+    grep -Eq '^diskutil unmountDisk|^dd |^sync$' "${EVENT_LOG}"
+}
+
+reset_fixture
+FIXTURE_DOCKER_FAIL="1"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external $'podman\n/dev/disk7\n' \
+        > "${WORK}/retry.out" 2> "${WORK}/retry.err" &&
+    grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retry.err" &&
+    grep -qF 'Type podman to retry with Podman' "${WORK}/retry.err" &&
+    grep -q '^docker run ' "${EVENT_LOG}" &&
+    grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! grep -q '^podman stale-output$' "${EVENT_LOG}" &&
+    grep -q '^diskutil unmountDisk /dev/disk7$' "${EVENT_LOG}" &&
+    grep -q '^sync$' "${EVENT_LOG}"; then
+    ok "an accepted Docker failure retry uses Podman and reaches the safe write flow"
+else
+    not_ok "an accepted Docker failure retry uses Podman and reaches the safe write flow"
+    cat "${WORK}/retry.err" >&2
+    cat "${EVENT_LOG}" >&2
+fi
+
+reset_fixture
+FIXTURE_DOCKER_FAIL="1"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external $'no\n' \
+        > "${WORK}/retry-decline.out" 2> "${WORK}/retry-decline.err"; then
+    not_ok "a declined Podman retry is terminal"
+elif grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retry-decline.err" &&
+    grep -qF 'Podman retry declined' "${WORK}/retry-decline.err" &&
+    ! grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "a declined Podman retry stops before target mutation"
+else
+    not_ok "a declined Podman retry stops before target mutation"
+fi
+
+reset_fixture
+FIXTURE_DOCKER_FAIL="1"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external "" \
+        > "${WORK}/retry-eof.out" 2> "${WORK}/retry-eof.err"; then
+    not_ok "EOF at the Podman retry is terminal"
+elif grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retry-eof.err" &&
+    grep -qF 'Podman retry declined' "${WORK}/retry-eof.err" &&
+    ! grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "EOF at the Podman retry stops before target mutation"
+else
+    not_ok "EOF at the Podman retry stops before target mutation"
+fi
+
+reset_fixture
+FIXTURE_DOCKER_FAIL="1"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_FAIL="1"
+FIXTURE_PODMAN_USABLE="1"
+if run_fixture /dev/disk7 external $'podman\n' \
+        > "${WORK}/retry-fail.out" 2> "${WORK}/retry-fail.err"; then
+    not_ok "a failed Podman retry is terminal"
+elif grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retry-fail.err" &&
+    grep -qF 'Podman could not personalise the installer' "${WORK}/retry-fail.err" &&
+    grep -q '^docker run ' "${EVENT_LOG}" &&
+    grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "a failed Podman retry stops before target mutation"
+else
+    not_ok "a failed Podman retry stops before target mutation"
+fi
+
+reset_fixture
+FIXTURE_DOCKER_FAIL="1"
+FIXTURE_DOCKER_USABLE="1"
+FIXTURE_PODMAN_USABLE=""
+if run_fixture /dev/disk7 external $'podman\n/dev/disk7\n' \
+        > "${WORK}/retry-unavailable.out" 2> "${WORK}/retry-unavailable.err"; then
+    not_ok "Docker failure without usable Podman is terminal"
+elif grep -qF 'Docker Desktop could not personalise the installer' "${WORK}/retry-unavailable.err" &&
+    grep -qF 'Podman is not usable' "${WORK}/retry-unavailable.err" &&
+    ! grep -qF 'Type podman to retry' "${WORK}/retry-unavailable.err" &&
+    ! grep -q '^podman run ' "${EVENT_LOG}" &&
+    ! target_was_mutated; then
+    ok "Docker failure without usable Podman stops before target mutation"
+else
+    not_ok "Docker failure without usable Podman stops before target mutation"
 fi
 
 reset_fixture
