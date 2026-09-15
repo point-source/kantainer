@@ -300,7 +300,6 @@ assert_runtime_success() {
             > "${WORK}/runtime.out" 2> "${WORK}/runtime.err" &&
         runtime_command="$(grep "^${selected} run " "${EVENT_LOG}")" &&
         [[ "$(grep -c "^${selected} run " "${EVENT_LOG}")" -eq 1 ]] &&
-        grep -q "^${selected} run " "${EVENT_LOG}" &&
         ! grep -q "^${other} run " "${EVENT_LOG}" &&
         [[ "${runtime_command}" == *" --volume ${REPO_ROOT}/output/installer:/iso:ro "* ]] &&
         [[ "${runtime_command}" == *" --volume "*":/out:rw "* ]] &&

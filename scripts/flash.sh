@@ -57,7 +57,6 @@ kantainer_select_runtime() {
     Start Podman or install it before flashing."
             fi
             KANTAINER_RUNTIME="podman"
-            KANTAINER_PODMAN_USABLE="1"
             ;;
         Darwin)
             if kantainer_runtime_usable docker; then
