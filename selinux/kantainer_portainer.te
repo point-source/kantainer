@@ -5,11 +5,14 @@
 ## from the machine's mandatory access control. This module is that exemption,
 ## and nothing more: the rest of the machine stays Enforcing.
 ##
-## Two permissions are missing from the shipped policy and only two are added:
-## writing the socket file, and connecting to the daemon behind it. Both come
-## from container_stream_connect(), which container-selinux maintains for exactly
-## this purpose - the rules are not written out here, so they stay correct as
-## upstream changes them.
+## The exemption itself is two permissions: writing the socket file, and
+## connecting to the daemon behind it. Both come from container_stream_connect(),
+## which container-selinux maintains for exactly this purpose - the rules are not
+## written out here, so they stay correct as upstream changes them.
+##
+## Everything else this module grants is not an exemption at all. It is the
+## ordinary access every container on the machine already has, which a domain
+## built from the template does not inherit - see the container_file_t block.
 ##
 ## Why a domain of its own rather than granting container_t: container_t is every
 ## container on the machine. Granting it there would hand the Docker socket to
@@ -25,6 +28,7 @@ gen_require(`
 	attribute container_net_domain;
 	attribute container_file_type;
 	type container_runtime_t;
+	type container_file_t;
 ')
 
 # Portainer's persistent data under /var/lib/portainer, and the staged
@@ -41,6 +45,40 @@ container_domain_template(kantainer_portainer, kantainer_portainer)
 # systemd gives up: the machine boots serving nothing, but only on an enforcing
 # kernel, which is exactly where a build-time test cannot see it.
 typeattribute kantainer_portainer_t container_net_domain;
+
+# THE ACCESS EVERY CONTAINER HAS, WHICH THIS DOMAIN DOES NOT INHERIT.
+#
+# container_domain_template(kantainer_portainer, kantainer_portainer) expands to
+# container_manage_files_template over kantainer_portainer_file_t - THIS domain's
+# own type. That covers /var/lib/portainer and the staged password and nothing
+# else, because the files inside the container are not labelled with it: both the
+# Portainer binary in the image's layers and the container's writable upper layer
+# are container_file_t.
+#
+# container_t has this access only because its own call is
+# container_domain_template(container, container), where the file prefix happens
+# to name container_file_t. Ours names our own type, so the same access has to be
+# asked for here.
+#
+# WHAT THE MISSING `map` COSTS, because nothing on the machine says it. container-
+# selinux grants container_domain `entrypoint` on container_file_t, so execve
+# succeeds - and then the loader's mmap of the binary is denied. Portainer dies
+# from SIGSEGV before it can log a word: systemd reports status=139, the journal
+# carries no Portainer output at all, and the only evidence anywhere on the
+# machine is the AVC.
+#
+# NOT container_manage_files_template(kantainer_portainer, container), which is
+# the tidier way to say this: that template also emits an fs_tmpfs_filetrans, and
+# a second one conflicts with the type_transition the first call already made.
+#
+# This widens nothing. MCS isolates this container from every other one - the
+# runtime gives each container its own categories, and only the shared image
+# layers carry none - so what is granted here is what any container already has.
+manage_dirs_pattern(kantainer_portainer_t, container_file_t, container_file_t)
+manage_files_pattern(kantainer_portainer_t, container_file_t, container_file_t)
+manage_lnk_files_pattern(kantainer_portainer_t, container_file_t, container_file_t)
+exec_files_pattern(kantainer_portainer_t, container_file_t, container_file_t)
+allow kantainer_portainer_t container_file_t:dir_file_class_set map;
 
 # Docker starts containers with NoNewPrivileges, which needs this transition.
 container_runtime_typebounds(kantainer_portainer_t)
