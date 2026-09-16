@@ -164,13 +164,32 @@ jobs:
 
       # cosign verify reads both signature formats, so it cannot tell us the
       # machine can. containers/image - what bootc uses - reads only the legacy
-      # attachment, published as a sha256-<digest>.sig tag. Pulling that tag is
+      # attachment, published as a sha256-<digest>.sig tag. Reading that tag is
       # the consumer-shaped check: if cosign ever writes a bundle instead,
       # signing and verifying both pass while every machine stops updating.
+      #
+      # NOT `podman pull`. A cosign signature is an OCI artifact whose single
+      # layer is a JSON payload, not a filesystem tar, so podman fetches the
+      # attachment and then dies unpacking it:
+      #
+      #   processing tar file(unexpected EOF): exit status 1
+      #
+      # That is podman refusing to treat a signature as a root filesystem, and
+      # it happens whether or not the signature is the right shape - so the step
+      # failed on every publish from the day it was written, reporting nothing
+      # about the thing it exists to check. A step that cannot pass is worse
+      # than no step: it turns a real signing regression into one more red run
+      # nobody reads.
+      #
+      # skopeo stops at the manifest, which is exactly as far as this needs to
+      # go, and the media type is the assertion - `simplesigning` IS the format
+      # machines read, and the thing --new-bundle-format=false above defends.
       - name: Confirm the signature is in the format machines read
         if: steps.gate.outputs.publish == 'true'
         env:
           DIGEST: ${{ steps.push-image.outputs.digest }}
         run: |
           set -euo pipefail
-          podman pull --quiet "${IMAGE_REF}:sha256-${DIGEST#sha256:}.sig" > /dev/null
+          skopeo inspect --raw "docker://${IMAGE_REF}:sha256-${DIGEST#sha256:}.sig" |
+            jq -e 'any(.layers[]; .mediaType ==
+              "application/vnd.dev.cosign.simplesigning.v1+json")' > /dev/null
