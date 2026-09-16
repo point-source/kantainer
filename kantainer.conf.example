@@ -82,3 +82,26 @@ KANTAINER_WIFI_SSID=
 
 # The WPA passphrase for that network, 8–63 characters.
 KANTAINER_WIFI_PASSPHRASE=
+
+# Whether the machine runs Watchtower, which updates the containers you deploy
+# (SPEC.md §spec:container-updates). `true` or `false`; blank means false.
+#
+# Watchtower is carried inside the image either way. This line only decides
+# whether it STARTS. Leaving it off costs you nothing you cannot change later:
+#
+#     sudo touch /etc/kantainer/watchtower-enabled
+#     sudo systemctl start kantainer-watchtower
+#
+# WHAT SETTING IT TO true MEANS. Every container on the machine is checked once
+# a night at 05:00 UTC, and any whose image has a newer version is stopped,
+# pulled and recreated, with the old image deleted. Nobody is watching when it
+# happens. A container that breaks on its new version stays broken until you
+# look.
+#
+# Portainer is excluded, and so is Watchtower itself: both are pinned in this
+# repository and move when the OS image moves. To exclude anything else, give it
+# the label `com.centurylinklabs.watchtower.enable=false`.
+#
+# It holds the Docker socket, which is root on this machine. See
+# docs/watchtower.md before switching it on.
+KANTAINER_WATCHTOWER_ENABLED=

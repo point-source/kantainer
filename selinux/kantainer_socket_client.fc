@@ -1,0 +1,10 @@
+# Deliberately empty of rules.
+#
+# This domain keeps no state on the machine, so nothing is labelled
+# kantainer_socket_client_file_t and there is no path to declare here. Contrast
+# kantainer_portainer.fc, which labels /var/lib/portainer.
+#
+# The file exists rather than being absent because refpolicy's build Makefile is
+# not consistent across releases about whether a module may have no .fc at all,
+# and a build that breaks on a Fedora bump is a worse trade than four lines of
+# comment. build_files/build.sh copies selinux/*.fc as a set.

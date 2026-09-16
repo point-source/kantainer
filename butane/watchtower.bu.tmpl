@@ -1,0 +1,35 @@
+    # THE WATCHTOWER SWITCH (SPEC.md §spec:container-updates).
+    #
+    # scripts/render-ignition.sh appends this fragment to butane/kantainer.bu.tmpl
+    # when, and only when, the operator set KANTAINER_WATCHTOWER_ENABLED=true. A
+    # machine that did not ask for Watchtower carries no trace of it in its
+    # Ignition config at all - exactly as a wired machine carries no wireless
+    # profile.
+    #
+    # It is a file rather than an enabled unit because at this moment the machine
+    # is still stock Fedora CoreOS: kantainer-watchtower.service does not exist
+    # yet and will not until the rebase in §spec:installer-media has run.
+    # `systemctl enable` has nothing to enable. The unit ships already enabled
+    # inside the image and reads this path as its ConditionPathExists, so the
+    # file is the whole of the switch.
+    #
+    # THE CONTENTS ARE NOT READ. Existence is the signal - nothing parses this
+    # file, so a machine where an operator wrote `false` into it by hand would
+    # still run Watchtower. The line inside says so to whoever opens it, which is
+    # the only place that warning can usefully live.
+    #
+    # /etc is persistent and carried forward across OS updates and rollbacks, so
+    # this outlives every later image.
+    - path: /etc/kantainer/watchtower-enabled
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          # This file existing is what starts kantainer-watchtower.service.
+          # Nothing reads what is written here. To switch Watchtower off:
+          #
+          #     sudo rm /etc/kantainer/watchtower-enabled
+          #     sudo systemctl stop kantainer-watchtower

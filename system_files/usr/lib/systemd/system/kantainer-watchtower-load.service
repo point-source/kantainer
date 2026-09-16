@@ -1,0 +1,19 @@
+[Unit]
+Description=Load the Watchtower image carried in the OS image into Docker
+Documentation=https://github.com/point-source/kantainer
+After=docker.service
+Requires=docker.service
+Before=kantainer-watchtower.service
+
+# DELIBERATELY NOT CONDITIONED ON /etc/kantainer/watchtower-enabled.
+# kantainer-watchtower.service is; this is not. Loading the image is what lets an
+# operator deploy Watchtower from Portainer without reaching a registry, which is
+# the other half of SPEC.md §spec:container-updates.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/kantainer/watchtower-load
+
+[Install]
+WantedBy=multi-user.target

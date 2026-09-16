@@ -218,7 +218,10 @@ storage:
       contents:
         local: portainer-admin-password
 
-    # KEEP THE FILES LIST LAST. render-ignition.sh appends
-    # butane/wireless.bu.tmpl here, as a further entry of this list, when and
-    # only when the operator's config names a wireless network. Anything added
-    # below would land inside the appended fragment instead.
+    # KEEP THE FILES LIST LAST. render-ignition.sh appends up to two further
+    # fragments here, each a further entry of this list:
+    #
+    #   butane/watchtower.bu.tmpl  when KANTAINER_WATCHTOWER_ENABLED=true
+    #   butane/wireless.bu.tmpl    when the operator's config names a network
+    #
+    # Anything added below would land inside an appended fragment instead.

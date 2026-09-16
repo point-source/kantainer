@@ -64,6 +64,9 @@ something else. Add criteria wherever they read best — nothing depends on the 
 - §req:sc:three-documents — The repository documents three things: how to rebuild after a
   change, how to write the installer to a USB stick, and how to confirm Portainer is up after
   first boot.
+- §req:sc:watchtower-documented — Before switching on unattended container updates, the
+  operator can read what they do, what they never touch, how to exclude a container, and that
+  the agent holds root-equivalent access to the machine.
 - §req:sc:macos-host-commands — On an Apple-silicon Mac running macOS 26 or newer, the operator
   can check a configuration, render it, and flash an installer through the documented commands
   while using the operating system's built-in Bash and checksum tools.

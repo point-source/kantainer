@@ -1,0 +1,43 @@
+[Unit]
+Description=Watchtower container update agent
+Documentation=https://github.com/nicholas-fedor/watchtower
+Documentation=https://github.com/point-source/kantainer
+After=docker.service kantainer-watchtower-load.service
+Requires=docker.service kantainer-watchtower-load.service
+
+# THE GATE (SPEC.md §spec:container-updates). This unit is enabled in the image,
+# so nothing has to run on the machine to switch it on - but it starts only if
+# this file exists. The installer writes it when, and only when, the operator set
+# KANTAINER_WATCHTOWER_ENABLED=true in their configuration.
+#
+# A condition rather than leaving the unit disabled: `systemctl status` reports a
+# skipped condition in plain words, so an operator who expected Watchtower and
+# has none is told why. A disabled unit says nothing at all.
+#
+# It is also the runtime switch. To turn Watchtower on later:
+#
+#     sudo touch /etc/kantainer/watchtower-enabled
+#     sudo systemctl start kantainer-watchtower
+#
+# and to turn it off, remove the file and stop the unit. /etc is persistent, so
+# either choice survives reboots and OS updates.
+ConditionPathExists=/etc/kantainer/watchtower-enabled
+
+# Without a limit, a machine where a second Watchtower is already running would
+# restart this one forever and bury the preflight's explanation. With it the unit
+# lands in "failed", where `systemctl status` says so plainly. Matches the
+# Portainer unit's arrangement.
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStartPre=/usr/libexec/kantainer/watchtower-preflight
+ExecStartPre=-/usr/bin/docker rm --force kantainer-watchtower
+ExecStart=/usr/libexec/kantainer/watchtower-run
+ExecStop=/usr/bin/docker stop kantainer-watchtower
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

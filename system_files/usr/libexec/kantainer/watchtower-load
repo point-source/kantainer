@@ -1,0 +1,31 @@
+#!/bin/bash
+# Load the Watchtower image carried inside the OS image into Docker
+# (SPEC.md §spec:container-updates).
+#
+# THIS RUNS WHETHER OR NOT WATCHTOWER IS ENABLED, and that is deliberate. The
+# gate in §spec:container-updates is on RUNNING Watchtower, not on having it. One
+# of the two supported ways to switch it on is deploying it from Portainer, and
+# an operator doing that needs the image already in Docker's store - otherwise
+# Portainer pulls it from ghcr.io, which is the registry dependency carrying the
+# archive exists to remove, and it pulls by whatever tag they typed rather than
+# the digest this repository pinned.
+#
+# The cost is about a second of boot time and the archive's size in /var on a
+# machine that never uses it. That is the cheaper of the two mistakes.
+#
+# Loaded unconditionally on every boot for the same reason portainer-load is -
+# see the long comment there. The short version: the tag is not an identity, a
+# digest refresh under an unchanged tag is a normal thing to ship, and Docker's
+# store survives OS updates. A presence check would pin the machine to whichever
+# Watchtower it first booted with, forever, with nothing saying so.
+
+set -oue pipefail
+
+ARCHIVE=/usr/lib/kantainer/watchtower.tar
+REF_FILE=/usr/lib/kantainer/watchtower-image
+
+read -r IMAGE_REF < "${REF_FILE}"
+
+echo "watchtower-load: loading ${IMAGE_REF} from ${ARCHIVE}"
+docker load --input "${ARCHIVE}"
+docker image inspect "${IMAGE_REF}" > /dev/null

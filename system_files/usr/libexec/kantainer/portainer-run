@@ -36,6 +36,17 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 # No --restart flag: systemd owns this container's lifecycle. Two supervisors
 # over one container is a fight nobody wins. Containers the operator deploys
 # through Portainer keep using Docker's own restart policy.
+# --label com.centurylinklabs.watchtower.enable=false KEEPS WATCHTOWER OFF THIS
+# CONTAINER (SPEC.md §spec:container-updates). Watchtower, when the operator
+# switches it on, updates every container on the machine, and this one is not
+# its business: Portainer is pinned by digest in versions.env and carried inside
+# the OS image, so it moves when the OS image moves. Without this label
+# Watchtower would pull portainer-ce from Docker Hub by tag - unsigned, past the
+# digest pin - and recreate the container, while systemd recreated its own from
+# the archive. The two would trade the name back and forth until
+# StartLimitBurst gave up and left the machine serving nothing.
+#
+# The label is inert on a machine where Watchtower was never switched on.
 # --security-opt label=type: is what opts this one container into the domain the
 # policy module defines. Without it Portainer would run as container_t, which is
 # every container on the machine and deliberately has no access to the socket.
@@ -49,6 +60,7 @@ exec /usr/bin/docker run --rm --name kantainer-portainer \
     --pull=never \
     --publish 9443:9443 \
     --security-opt label=type:kantainer_portainer_t \
+    --label com.centurylinklabs.watchtower.enable=false \
     --volume /run/docker.sock:/var/run/docker.sock \
     --volume /var/lib/portainer:/data \
     --volume /run/kantainer/portainer-admin-password:/run/portainer-admin-password:ro \

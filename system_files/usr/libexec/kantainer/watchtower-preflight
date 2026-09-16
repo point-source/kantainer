@@ -1,0 +1,55 @@
+#!/bin/bash
+# Refuse to start a second Watchtower (SPEC.md §spec:container-updates).
+#
+# §spec:container-updates supports two ways to switch Watchtower on: this systemd
+# unit, gated on the operator's configuration, or deploying it from Portainer.
+# They are alternatives, not a pair. Two Watchtowers over one Docker engine both
+# decide the same container is out of date, and both stop and recreate it - the
+# second acting on a container the first has already removed.
+#
+# The unit's own `docker rm --force kantainer-watchtower` handles a stale copy of
+# OURS. This catches the other one: a container the operator deployed from
+# Portainer, under a name only they know, from the same image.
+#
+# Matching on the image rather than the name is what makes that possible. The
+# reference is the one the build wrote, so a stack deployed from the image
+# Portainer already has - which is the path docs/watchtower.md documents - is
+# recognised.
+
+set -oue pipefail
+
+read -r IMAGE_REF < /usr/lib/kantainer/watchtower-image
+
+# --filter is matched by docker against the image reference as given. A stack
+# that named a digest or another tag of the same image is not caught here, and
+# that is a known gap rather than an oversight: this check exists to catch the
+# documented path, not to be a lock.
+others="$(docker ps --filter "ancestor=${IMAGE_REF}" --format '{{.Names}}' |
+    grep -vx kantainer-watchtower || true)"
+
+if [[ -n "${others}" ]]; then
+    cat >&2 <<MSG
+Watchtower was not started: one is already running on this machine.
+
+  Already running: ${others//$'\n'/, }
+  Image:           ${IMAGE_REF}
+
+Two Watchtowers over one Docker engine race each other: both decide a container
+is out of date, both stop and recreate it, and the loser acts on a container
+that no longer exists.
+
+Keep ONE of them:
+
+  - to keep the one above, leave this unit alone. Clear
+    KANTAINER_WATCHTOWER_ENABLED in your configuration file so it does not start
+    on the next machine you flash, and run:
+
+        systemctl disable --now kantainer-watchtower
+
+  - to keep this unit instead, remove the container above - from Portainer, or:
+
+        docker rm --force ${others%%$'\n'*}
+        systemctl start kantainer-watchtower
+MSG
+    exit 1
+fi

@@ -15,6 +15,9 @@ and [SPEC.md](SPEC.md) for how it works.
 - [Confirm Portainer is up after first boot](docs/verify.md) — the two reboots, the address on the
   machine's own login screen, the certificate warning, the login page, and what to check when
   Portainer does not answer.
+- [Keep your containers updated](docs/watchtower.md) — what Watchtower does when it is on, what
+  it never touches, the two ways to switch it on, and the one line that matters if you run it
+  from Portainer yourself.
 
 ## Working on this repository
 
