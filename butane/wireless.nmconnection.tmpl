@@ -8,6 +8,10 @@ autoconnect=true
 [wifi]
 mode=infrastructure
 ssid=@@SSID@@
+# Power save off. A sleeping station misses the broadcast ARP that every
+# inbound connection begins with, so the machine goes unreachable while looking
+# perfectly healthy to itself.
+powersave=2
 
 [wifi-security]
 key-mgmt=wpa-psk

@@ -625,6 +625,11 @@ reads_back() {
 reads_back "NetworkManager reads back the operator's network" wifi ssid "${TEST_SSID}"
 reads_back "NetworkManager reads back the passphrase" wifi-security psk "${TEST_PASSPHRASE}"
 
+# 2 is NetworkManager's "disable". Asserted through GLib like everything else
+# here, because a profile that carries the key with a value NetworkManager reads
+# as something else is a machine that still goes unreachable.
+reads_back "the profile turns wifi power save off" wifi powersave "2"
+
 ### values that are hostile to a templating engine
 
 # An SSH key comment and a WPA passphrase are free text. Both can contain the

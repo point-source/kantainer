@@ -328,6 +328,13 @@ Installation itself requires a wired connection, regardless of whether the machi
 later run on wireless. A machine intended for wireless operation is installed on ethernet
 once and then moved.
 
+The wireless radio does not sleep. NetworkManager's default leaves power management to the
+driver, which parks the card between beacons; a station that is asleep receives broadcast
+frames only after a DTIM beacon, and the ARP request that begins every inbound connection is
+broadcast. Such a machine answers nobody while still reaching its gateway and holding its
+lease - unreachable, and healthy by every measure it can take of itself. The profile turns
+power save off.
+
 The operator finds the machine's address from their router. The machine assumes no fixed
 address.
 
@@ -347,6 +354,8 @@ mandatory was rejected as forcing configuration on the wired case, which is the 
 
 **Tradeoffs.** A machine that will live somewhere without ethernet must be installed
 somewhere with it. This is a one-time inconvenience at install, not an ongoing constraint.
+A wireless machine also draws slightly more power for a radio that never sleeps, which buys
+the only path to a machine that has one.
 
 Cites §req:quality-attributes, §req:constraints, §req:sc:portainer-in-a-browser.
 
