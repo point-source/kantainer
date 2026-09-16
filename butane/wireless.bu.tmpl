@@ -12,6 +12,23 @@
     # ssid field. It follows that a machine has one wireless network, which is
     # what §req:constraints scopes: one operator, one machine.
     #
+    # POWER SAVE IS OFF IN THAT PROFILE, and it is not a tuning preference.
+    # NetworkManager's default leaves it to the driver, which on iwlwifi means
+    # on. A station that sleeps between beacons receives broadcast frames only
+    # after a DTIM beacon, and ARP requests are broadcast - so the machine
+    # answers nobody's ARP, every inbound connection fails before it is made,
+    # and nothing on the machine looks wrong: it reaches its gateway, holds its
+    # lease, and reports a healthy link. Observed on real hardware, where a
+    # machine sat awake and unreachable for ninety minutes with the login screen
+    # still showing the address nobody could connect to.
+    #
+    # It is the wireless case that cannot tolerate this. A machine reached over
+    # wireless has that one path, and SPEC.md §spec:remote-access is what an
+    # operator is left with when it breaks - so the radio dozing is the
+    # difference between a machine that is administrable and one that needs a
+    # keyboard. The cost is a few hundred milliwatts on a machine that is
+    # already running Docker.
+    #
     # butane/wireless.nmconnection.tmpl sets no route metric or priority.
     # §spec:network-attachment wants the wired connection used when one is
     # present, and preferring wired over wireless is already what
