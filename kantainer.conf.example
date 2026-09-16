@@ -92,16 +92,21 @@ KANTAINER_WIFI_PASSPHRASE=
 #     sudo touch /etc/kantainer/watchtower-enabled
 #     sudo systemctl start kantainer-watchtower
 #
-# WHAT SETTING IT TO true MEANS. Every container on the machine is checked once
-# a night at 05:00 UTC, and any whose image has a newer version is stopped,
-# pulled and recreated, with the old image deleted. Nobody is watching when it
-# happens. A container that breaks on its new version stays broken until you
-# look.
+# WHAT SETTING IT TO true MEANS. Once a night at 05:00 UTC, Watchtower checks
+# the containers you have LABELLED for it, and any whose image has a newer
+# version is stopped, pulled and recreated, with the old image deleted. Nobody is
+# watching when it happens, and a container that breaks on its new version stays
+# broken until you look.
 #
-# Portainer is excluded, and so is Watchtower itself: both are pinned in this
-# repository and move when the OS image moves. To exclude anything else, give it
-# the label `com.centurylinklabs.watchtower.enable=false`.
+# Nothing is updated until you opt a container in, in the stack that defines it:
+#
+#     labels:
+#       com.centurylinklabs.watchtower.enable: "true"
+#
+# So switching this on and labelling nothing changes nothing. A container you
+# forget to label is simply never updated.
 #
 # It holds the Docker socket, which is root on this machine. See
-# docs/watchtower.md before switching it on.
+# docs/watchtower.md before switching it on - including how to change the
+# schedule, add notifications, or have it update every container instead.
 KANTAINER_WATCHTOWER_ENABLED=

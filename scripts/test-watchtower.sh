@@ -16,10 +16,19 @@
 #     between Watchtower stopping it and recreating it
 #   - a load unit that gained the enabled-gate is a machine where "deploy it
 #     from Portainer" silently pulls from ghcr.io instead
+#   - a default moved from the env file onto the command line is an operator
+#     override that is accepted and ignored: Watchtower lets a flag beat its own
+#     environment variable, so WATCHTOWER_LABEL_ENABLE=false would do nothing
+#     and the operator would be told nothing
 #
 # None of that appears in a build log. These assertions read the files the image
 # carries and the parts of build.sh that decide what runs. They cannot prove the
 # machine updates anything - only a booted machine does that.
+
+# Several assertions below search watchtower-run for the literal text
+# `--env-file "${DEFAULTS}"`. The single quotes are there so that text is matched
+# as written rather than expanded here, which is what the linter warns against.
+# shellcheck disable=SC2016
 
 set -oue pipefail
 
@@ -33,6 +42,7 @@ WATCHTOWER_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower.ser
 WATCHTOWER_LOAD_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower-load.service"
 OVERNIGHT="${SYSTEM_FILES}/usr/lib/systemd/system/bootc-fetch-apply-updates.timer.d/10-kantainer-overnight.conf"
 BUTANE_FRAGMENT="${REPO_ROOT}/butane/watchtower.bu.tmpl"
+DEFAULTS_ENV="${SYSTEM_FILES}/usr/lib/kantainer/watchtower-defaults.env"
 
 # The gate, written in one place here and compared against every file that names
 # it. A rename that reached three of the four would otherwise ship.
@@ -120,6 +130,44 @@ refute "the run script does not borrow Portainer's domain" \
     grep -Fq -- "kantainer_portainer_t" <(code "${WATCHTOWER_RUN}")
 
 echo
+echo "# Watchtower touches only what the operator labelled, and the operator can change that"
+
+assert "the image's default scope is opt-in by label" \
+    grep -Fxq "WATCHTOWER_LABEL_ENABLE=true" "${DEFAULTS_ENV}"
+
+assert "the run script passes the image's defaults" \
+    grep -Fq -- '--env-file "${DEFAULTS}"' <(code "${WATCHTOWER_RUN}")
+
+assert "the run script passes the operator's file when there is one" \
+    grep -Fq -- '--env-file "${OPERATOR}"' <(code "${WATCHTOWER_RUN}")
+
+# Docker lets a LATER env file override an earlier one, and that is the entire
+# mechanism by which the operator's file wins. Reversed, the image's defaults
+# would silently beat everything the operator wrote.
+defaults_line="$(grep -n -- '--env-file "${DEFAULTS}"' "${WATCHTOWER_RUN}" | head -1 | cut -d: -f1)"
+operator_line="$(grep -n -- '--env-file "${OPERATOR}"' "${WATCHTOWER_RUN}" | head -1 | cut -d: -f1)"
+if [[ -n "${defaults_line}" && -n "${operator_line}" && "${defaults_line}" -lt "${operator_line}" ]]; then
+    ok "the operator's file is passed after the defaults, so it wins"
+else
+    not_ok "the operator's file is not passed after the image's defaults (defaults line ${defaults_line:-?}, operator line ${operator_line:-?})
+           Docker lets a later --env-file override an earlier one. In any other
+           order the operator's overrides are accepted and silently ignored."
+fi
+
+# THE GUARD FOR THE MISTAKE THAT LOOKS LIKE A TIDY-UP. Anything after the image
+# reference is an argument to Watchtower, and every Watchtower flag beats the
+# environment variable of the same name - so a default written there could never
+# be overridden, and the operator would never be told. The image reference must
+# therefore be the last argument: its line carries no continuation.
+if code "${WATCHTOWER_RUN}" | grep -Eq '^[[:space:]]*"\$\{IMAGE_REF\}"[[:space:]]*$'; then
+    ok "nothing follows the image, so no Watchtower flag can override the operator"
+else
+    not_ok "something follows the image reference in watchtower-run
+           Watchtower flags beat environment variables. Put defaults in
+           watchtower-defaults.env, where the operator's file can change them."
+fi
+
+echo
 echo "# Nothing runs Watchtower unless the operator asked"
 
 assert "the service is gated on the operator's file" \
@@ -153,6 +201,11 @@ assert "build.sh enables the load unit" \
 assert "build.sh carries the image as an archive" \
     grep -Fq "watchtower.tar" <(code "${BUILD_SH}")
 
+# Without it `docker run --env-file` fails, and Watchtower never starts on any
+# machine that switched it on.
+assert "build.sh checks the defaults file shipped" \
+    grep -Fq "test -f /usr/lib/kantainer/watchtower-defaults.env" <(code "${BUILD_SH}")
+
 echo
 echo "# The two update windows do not overlap"
 
@@ -165,9 +218,12 @@ echo "# The two update windows do not overlap"
 # So the requirement is not "different hours", it is "Watchtower starts after the
 # OS window has closed". Both numbers are read from the files rather than written
 # down here, so moving either one is what trips this.
+#
+# This guards the image's DEFAULT. An operator can move the hour in their own env
+# file, and docs/watchtower.md tells them what the window costs if they do.
 os_hour="$(sed -n 's/^OnCalendar=\*-\*-\* \([0-9]\{2\}\):.*/\1/p' "${OVERNIGHT}")"
 os_jitter_h="$(sed -n 's/^RandomizedDelaySec=\([0-9][0-9]*\)h$/\1/p' "${OVERNIGHT}")"
-wt_hour="$(sed -n 's/.*--schedule "0 0 \([0-9][0-9]*\) .*/\1/p' <(code "${WATCHTOWER_RUN}"))"
+wt_hour="$(sed -n 's/^WATCHTOWER_SCHEDULE=0 0 \([0-9][0-9]*\) .*/\1/p' "${DEFAULTS_ENV}")"
 
 if [[ -z "${os_hour}" || -z "${os_jitter_h}" || -z "${wt_hour}" ]]; then
     not_ok "could not read both schedules (os=${os_hour:-?} jitter=${os_jitter_h:-?}h watchtower=${wt_hour:-?})

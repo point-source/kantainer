@@ -507,13 +507,21 @@ from the image already in the store, or create the gate file and start the unit 
 Starting a second one when the first is already running is refused, with a message naming
 the one already there.
 
-Once running, it checks every container on the machine once a night and replaces any whose
-image has a newer version, deleting the image it replaced. The check is at 05:00, clear of
-the operating system's own update window and the reboot that ends it (§spec:os-updates).
+Once running, it updates only the containers the operator has labelled for it. Each night it
+checks those, replaces any whose image has a newer version, and deletes the image it
+replaced. Switching Watchtower on and labelling nothing changes nothing. The check is at
+05:00, clear of the operating system's own update window and the reboot that ends it
+(§spec:os-updates).
 
-Portainer and Watchtower itself are excluded. Both are pinned in this repository and carried
-inside the OS image, so both move when the image moves and neither is Watchtower's business.
-The operator excludes anything else the same way, with a label.
+These defaults live in a file the image owns, and the operator can override any of them in a
+file of their own on the machine — the schedule, notifications, a monitor-only mode, or the
+scope itself. An override the operator writes takes effect; none is accepted and then
+ignored.
+
+Portainer and Watchtower itself carry an exclusion label. Under the default scope it is
+redundant, since neither is labelled in. It stays because the operator can widen the scope
+to every container, and from that moment the label is the only thing keeping Watchtower off
+two containers that are pinned in this repository and move only when the image moves.
 
 Watchtower reaches the Docker control socket, which is root-equivalent access to the
 machine, and so needs the same exemption from mandatory access control that Portainer needs.
@@ -533,11 +541,22 @@ pushed to a tag, applied unattended, with nothing to roll back to — Docker kee
 deployment. An operator who wants that should say so; an operator who does not should not
 discover it from a container that stopped working overnight.
 
-The scope is every container rather than an opt-in list because the operator chose it: the
-machine's job is running containers, and a switch that then required a label on each one
-would be a switch that mostly looks switched on. The cost is that the exclusion label is the
-only brake, which is why `just config-check` states the choice back and why
-§spec:operator-documentation covers the label before it covers anything else.
+The scope is opt-in by label because the two ways of getting it wrong are not the same size.
+An operator who forgets to label a container in leaves it un-updated, which is where it
+already was. An operator who forgets to label one out — under a watch-everything scope —
+finds it stopped, replaced and restarted overnight with nobody watching and nothing to roll
+back to. A switch that asks for a label per container looks less switched on than it is, and
+`just config-check` names the label for exactly that reason: the likelier surprise is
+Watchtower running and updating nothing.
+
+The defaults are environment variables in an image-owned file, passed ahead of the
+operator's own, rather than flags on Watchtower's command line. Both obvious alternatives
+break the override silently, and both were verified against the pinned image rather than
+assumed: Watchtower lets a flag win over its own environment variable, and Docker lets
+`--env` win over every `--env-file` regardless of order. Either way the operator's setting
+would be accepted and ignored with nothing reporting it. Docker does let a later env file
+override an earlier one, which is the whole mechanism, and `scripts/test-watchtower.sh`
+fails if a default reappears on the command line or the two files swap order.
 
 A second SELinux domain rather than reusing Portainer's: Portainer's domain also owns
 Portainer's database, administrator hash and TLS key, and Watchtower has no business with
@@ -558,15 +577,22 @@ denial, was rejected as the same trade made less visibly — it runs the contain
 rather than in a domain anyone can read.
 
 Shipping Watchtower enabled was rejected as changing what an existing machine does on the
-strength of an image update. Not shipping it at all and documenting the label-and-domain
+strength of an image update.
+
+Watching every container and excluding by label was rejected as the larger of the two
+mistakes (above). It remains one line away for an operator who wants it.
+
+A systemd drop-in as the way to change Watchtower's options was rejected: overriding
+`ExecStart` forks the whole command line — the SELinux opt-in, `--pull=never`, the socket
+mount — into `/etc`, where a later change to the image's copy never reaches it. Not shipping it at all and documenting the label-and-domain
 recipe was rejected as leaving the operator to assemble from documentation the one
 arrangement this repository is in a position to get right.
 
 Updating Portainer with Watchtower was rejected outright. Portainer is digest-pinned inside
 the OS image and started by systemd with `--pull=never`; a Watchtower recreating it would
 pull an unsigned image from Docker Hub by tag, past that pin, and then trade the container
-name back and forth with systemd until the service gave up. The exclusion label is what
-prevents it and is not optional.
+name back and forth with systemd until the service gave up. The exclusion label prevents it
+under any scope the operator can choose, and is not optional.
 
 **Tradeoffs.** The image carries a second container archive it may never run, costing space
 in the image and in Docker's store, and about a second of boot time loading it. Switching
@@ -577,8 +603,16 @@ does not exist yet to be enabled.
 
 Unattended container updates can break a service overnight with nobody watching, and nothing
 here rolls that back. That is the cost of the feature rather than a defect in it, which is
-why it is off unless asked for and why both the configuration template and `just config-check`
-say it in those words.
+why it is off unless asked for, opt-in per container once it is on, and why both the
+configuration template and `just config-check` say so in those words.
+
+Opt-in has a quiet failure of its own: a container deployed later and never labelled is never
+updated, and nothing reports it. That was judged the right way round to be quiet.
+
+The operator's override file is a second place Watchtower's behaviour is decided, and
+`docker inspect` shows both the default and the override as separate entries even though
+only the later one takes effect. The documentation says so, because it is the first thing
+someone debugging an override will look at.
 
 Cites §req:problem-statement, §req:quality-attributes, §req:constraints,
 §req:sc:containers-survive-reboot, §req:sc:data-survives-updates.
@@ -1078,10 +1112,11 @@ verification guide also distinguishes a machine that stopped during installation
 working.
 
 A fourth guide covers unattended container updates (§spec:container-updates). It states what
-Watchtower does once a night, that nothing rolls back a container it breaks, that Portainer and
-Watchtower itself are excluded and how to exclude anything else, both ways to switch it on, and
-the SELinux line an operator running it from Portainer themselves will otherwise spend a day on.
-It says in the operator's own terms that the agent holds root-equivalent access to the machine.
+Watchtower does once a night, that it touches only containers labelled in and nothing rolls back
+one it breaks, how to change its defaults and what widening the scope or moving the schedule
+costs, both ways to switch it on, and the SELinux line an operator running it from Portainer
+themselves will otherwise spend a day on. It says in the operator's own terms that the agent
+holds root-equivalent access to the machine.
 
 The flash procedure states the supported operator hosts and their prerequisites. For macOS it
 shows how to list external physical disks, requires the full `/dev/diskN` path, explains the

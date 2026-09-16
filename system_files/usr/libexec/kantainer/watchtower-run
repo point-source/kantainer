@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run Watchtower over the containers the operator deploys
+# Run Watchtower over the containers the operator has labelled
 # (SPEC.md §spec:container-updates).
 #
 # A script rather than a bare ExecStart= for the same reason portainer-run is
@@ -9,6 +9,37 @@
 set -oue pipefail
 
 read -r IMAGE_REF < /usr/lib/kantainer/watchtower-image
+
+# WHAT WATCHTOWER DOES IS DECIDED BY TWO ENV FILES, NOT BY THIS SCRIPT.
+#
+#   /usr/lib/kantainer/watchtower-defaults.env  the image's defaults: opt-in by
+#                                               label, clean up, 05:00 UTC
+#   /etc/kantainer/watchtower.env               the operator's overrides, if any
+#
+# Passed in that order, because Docker lets a later env file override an earlier
+# one - verified against the pinned Watchtower, not assumed.
+#
+# DO NOT MOVE A DEFAULT ONTO THIS COMMAND LINE. It looks tidier and it silently
+# breaks the override. Watchtower lets a flag win over its own environment
+# variable, and Docker lets --env win over every --env-file whatever the order,
+# so `--label-enable` here would make WATCHTOWER_LABEL_ENABLE=false in the
+# operator's file do nothing at all - accepted, ignored, and never reported.
+# scripts/test-watchtower.sh fails if a policy flag appears here.
+#
+# --env-file rather than systemd's EnvironmentFile=: this script's environment is
+# not the container's. The Docker CLI reads both files here on the host and
+# passes their contents in, so neither needs an SELinux label a container can
+# read - unlike Portainer's password, which has to be staged into /run first.
+#
+# The operator's file is absent by default, and absent is the documented state.
+# Passing --env-file for a file that does not exist is an error, hence the test.
+DEFAULTS=/usr/lib/kantainer/watchtower-defaults.env
+OPERATOR=/etc/kantainer/watchtower.env
+
+env_files=(--env-file "${DEFAULTS}")
+if [[ -f "${OPERATOR}" ]]; then
+    env_files+=(--env-file "${OPERATOR}")
+fi
 
 # --security-opt label=type: opts this container into the domain that may hold
 #     the Docker socket (selinux/kantainer_socket_client.te). Without it
@@ -23,44 +54,22 @@ read -r IMAGE_REF < /usr/lib/kantainer/watchtower-image
 #     versions.env. Failing here instead is the honest outcome; the load unit
 #     cannot catch it, being a oneshot that stays active once it has run.
 #
-# --label ...watchtower.enable=false EXCLUDES WATCHTOWER FROM ITSELF, and it is
-#     load-bearing. Watchtower updates its own container by default: it would
-#     pull a newer Watchtower from ghcr.io and hand over to it, which breaks the
-#     promise that the version running is the version versions.env recorded, and
-#     leaves a container systemd did not start holding the Docker socket. This
-#     Watchtower moves when the OS image moves, exactly like Portainer.
+# --label ...watchtower.enable=false EXCLUDES WATCHTOWER FROM ITSELF. Under the
+#     default opt-in scope it is redundant, and it stays anyway: the operator's
+#     env file can switch opt-in off, and the moment it does this label is the
+#     only thing standing between Watchtower and updating itself out of the
+#     version versions.env pinned. portainer-run carries the same label for the
+#     same reason.
+#
+#     This one IS a flag, and correctly so: it is a Docker label on the container,
+#     not a Watchtower setting, and nothing an operator writes should remove it.
 #
 # No --restart flag and no published port: systemd owns this container's
 # lifecycle, and Watchtower's optional HTTP API stays off.
-#
-# --cleanup removes the image a container was replaced from. Without it every
-#     update leaves its predecessor behind, and this is a machine with one disk
-#     that nobody is watching.
-#
-# --schedule runs at 05:00 rather than continuously. The six fields are
-#     Watchtower's own cron dialect, seconds first.
-#
-#     THE HOUR IS CHOSEN, NOT ARBITRARY. The OS update window is 03:00 plus up to
-#     an hour of jitter (bootc-fetch-apply-updates.timer.d/10-kantainer-overnight.conf),
-#     and it ends by rebooting the machine. A reboot landing between Watchtower
-#     stopping a container and recreating it leaves that container not merely
-#     stopped but GONE - no restart policy brings back a container that no longer
-#     exists. 05:00 keeps the whole of one window clear of the other.
-#
-#     It is UTC unless the machine's timezone has been changed, which Fedora
-#     CoreOS does not do by default. /etc/localtime is deliberately not mounted:
-#     files under /etc carry a label this domain cannot read, and widening the
-#     policy module to fix a clock display is not a trade worth making.
-#
-# Nothing here limits WHICH containers are updated, so every container on the
-# machine is in scope except the two carrying the exclusion label: this one and
-# Portainer. An operator who wants a container left alone gives it the same
-# label - docs/watchtower.md says how.
 exec /usr/bin/docker run --rm --name kantainer-watchtower \
     --pull=never \
     --security-opt label=type:kantainer_socket_client_t \
     --label com.centurylinklabs.watchtower.enable=false \
     --volume /run/docker.sock:/var/run/docker.sock \
-    "${IMAGE_REF}" \
-    --cleanup \
-    --schedule "0 0 5 * * *"
+    "${env_files[@]}" \
+    "${IMAGE_REF}"

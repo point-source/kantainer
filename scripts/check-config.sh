@@ -56,11 +56,12 @@ fi
 # Reported for the same reason the console password is: it is a choice with a
 # cost either way, and the moment the operator is reading their own config back
 # is the moment to state it (SPEC.md §spec:container-updates). The `true` case
-# gets the longer line - it is the one that changes containers while nobody is
-# watching.
+# names the label, because the commonest surprise is the opposite of the one
+# people expect: Watchtower running, and updating nothing, because nothing is
+# labelled.
 if [[ "${KANTAINER_WATCHTOWER_ENABLED}" == "true" ]]; then
-    echo "  Watchtower will run. Your containers are updated nightly at 05:00 UTC, unattended."
-    echo "  Portainer and Watchtower itself are excluded. See docs/watchtower.md."
+    echo "  Watchtower will run nightly at 05:00 UTC, unattended."
+    echo "  It updates only containers labelled com.centurylinklabs.watchtower.enable=true. See docs/watchtower.md."
 else
     echo "  Watchtower will not run. It is carried in the image and can be started later."
 fi

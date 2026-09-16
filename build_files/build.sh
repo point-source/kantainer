@@ -352,6 +352,12 @@ test -x /usr/libexec/kantainer/watchtower-load
 test -x /usr/libexec/kantainer/watchtower-run
 test -x /usr/libexec/kantainer/watchtower-preflight
 
+# Not an executable, and checked for a harsher reason: watchtower-run always
+# passes it with --env-file, and Docker refuses to start a container whose env
+# file is missing. The image would build, and Watchtower would fail to start on
+# every machine that switched it on.
+test -f /usr/lib/kantainer/watchtower-defaults.env
+
 # curl is what makes the port statement a statement about HTTPS rather than
 # about a TCP connect (SPEC.md §spec:console-display). It comes from the base
 # image, and if it ever stopped coming the probe would not crash - it would

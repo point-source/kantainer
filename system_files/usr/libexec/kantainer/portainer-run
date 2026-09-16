@@ -37,14 +37,18 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 # over one container is a fight nobody wins. Containers the operator deploys
 # through Portainer keep using Docker's own restart policy.
 # --label com.centurylinklabs.watchtower.enable=false KEEPS WATCHTOWER OFF THIS
-# CONTAINER (SPEC.md §spec:container-updates). Watchtower, when the operator
-# switches it on, updates every container on the machine, and this one is not
-# its business: Portainer is pinned by digest in versions.env and carried inside
-# the OS image, so it moves when the OS image moves. Without this label
-# Watchtower would pull portainer-ce from Docker Hub by tag - unsigned, past the
-# digest pin - and recreate the container, while systemd recreated its own from
-# the archive. The two would trade the name back and forth until
-# StartLimitBurst gave up and left the machine serving nothing.
+# CONTAINER (SPEC.md §spec:container-updates). Portainer is not Watchtower's
+# business: it is pinned by digest in versions.env and carried inside the OS
+# image, so it moves when the OS image moves.
+#
+# Watchtower's default scope is opt-in by label, which already leaves an
+# unlabelled Portainer alone - so this is redundant by default, and it stays. The
+# operator can switch opt-in off in /etc/kantainer/watchtower.env, and from that
+# moment this label is the only thing keeping Watchtower from pulling
+# portainer-ce from Docker Hub by tag - unsigned, past the digest pin - and
+# recreating the container while systemd recreated its own from the archive. The
+# two would trade the name back and forth until StartLimitBurst gave up and left
+# the machine serving nothing.
 #
 # The label is inert on a machine where Watchtower was never switched on.
 # --security-opt label=type: is what opts this one container into the domain the
