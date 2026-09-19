@@ -15,10 +15,19 @@
 # reference is the one the build wrote, so a stack deployed from the image
 # Portainer already has - which is the path docs/watchtower.md documents - is
 # recognised.
+#
+# Usage: watchtower-preflight [image-reference-file]
+#
+# The argument defaults to the file the build writes, which is how the unit
+# calls it. It is spelled out so the refusal can be exercised against a stubbed
+# Docker in scripts/test-watchtower.sh: everything this script decides is
+# decided from those two inputs, and a check that is never run is a check that
+# has already stopped working.
 
 set -oue pipefail
 
-read -r IMAGE_REF < /usr/lib/kantainer/watchtower-image
+IMAGE_FILE="${1:-/usr/lib/kantainer/watchtower-image}"
+read -r IMAGE_REF < "${IMAGE_FILE}"
 
 # --filter is matched by docker against the image reference as given. A stack
 # that named a digest or another tag of the same image is not caught here, and

@@ -38,6 +38,7 @@ BUILD_SH="${REPO_ROOT}/build_files/build.sh"
 
 PORTAINER_RUN="${SYSTEM_FILES}/usr/libexec/kantainer/portainer-run"
 WATCHTOWER_RUN="${SYSTEM_FILES}/usr/libexec/kantainer/watchtower-run"
+WATCHTOWER_PREFLIGHT="${SYSTEM_FILES}/usr/libexec/kantainer/watchtower-preflight"
 WATCHTOWER_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower.service"
 WATCHTOWER_LOAD_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower-load.service"
 OVERNIGHT="${SYSTEM_FILES}/usr/lib/systemd/system/bootc-fetch-apply-updates.timer.d/10-kantainer-overnight.conf"
@@ -190,6 +191,28 @@ assert "the configuration field is one the parser knows" \
     grep -Fxq "    KANTAINER_WATCHTOWER_ENABLED" "${REPO_ROOT}/scripts/config-lib.sh"
 
 echo
+echo "# A Watchtower that was asked to stop stays stopped"
+
+# WATCHTOWER_RUN_ONCE=true is an operator override docs/watchtower.md lists, and
+# the pinned Watchtower honours it by doing a single pass and exiting 0. Under
+# Restart=always systemd would start it again five seconds later and keep doing
+# so - continuous unattended updating on a machine whose pass outlasts
+# RestartSec, and a unit in "failed" on one whose pass does not. The operator's
+# setting would be accepted and silently turned into something else, which is
+# the same failure shape the env-file ordering above exists to prevent.
+assert "a clean exit is not restarted, so run-once means once" \
+    grep -Fxq "Restart=on-failure" "${WATCHTOWER_UNIT}"
+
+refute "the unit does not restart a Watchtower that exited cleanly" \
+    grep -Fxq "Restart=always" "${WATCHTOWER_UNIT}"
+
+# The other direction of the same line. A Watchtower killed out from under
+# systemd - `docker rm --force`, an OOM kill, a daemon restart - exits non-zero,
+# and nothing else on the machine would bring it back.
+assert "a Watchtower that died is still restarted" \
+    grep -q "^Restart=on-failure$" "${WATCHTOWER_UNIT}"
+
+echo
 echo "# Both units reach the machine"
 
 assert "build.sh enables the service" \
@@ -205,6 +228,99 @@ assert "build.sh carries the image as an archive" \
 # machine that switched it on.
 assert "build.sh checks the defaults file shipped" \
     grep -Fq "test -f /usr/lib/kantainer/watchtower-defaults.env" <(code "${BUILD_SH}")
+
+echo
+echo "# A second Watchtower is refused, and a first one is not"
+
+assert "the preflight ships and is executable" \
+    test -x "${WATCHTOWER_PREFLIGHT}"
+
+# Plumbing with no consumer never runs.
+assert "the unit runs the preflight before starting Watchtower" \
+    grep -Fxq "ExecStartPre=/usr/libexec/kantainer/watchtower-preflight" "${WATCHTOWER_UNIT}"
+
+# THE REFUSAL, RUN RATHER THAN READ. Everything the preflight decides comes from
+# `docker ps`, so it can be given one that says a chosen thing. Each of the three
+# parts below is silent when it breaks: a filter that stopped matching, or a
+# self-name exclusion that stopped excluding, both leave a machine that looks
+# exactly like a healthy one - either two Watchtowers racing over every container
+# the operator labelled, or a unit that can never start again after its own
+# restart.
+STUB="$(mktemp -d)"
+trap 'rm -rf "${STUB}"' EXIT
+
+TEST_IMAGE=ghcr.io/example/watchtower:1.2.3
+printf '%s\n' "${TEST_IMAGE}" > "${STUB}/watchtower-image"
+
+# preflight_with <name> <want-exit> <names docker ps reports> [expected ancestor]
+#
+# The stub asserts its own --filter argument: a preflight that stopped filtering
+# by image would otherwise pass every case here by accident.
+preflight_with() {
+    local name="$1" want="$2" names="$3" ancestor="${4:-ancestor=${TEST_IMAGE}}"
+
+    cat > "${STUB}/docker" <<STUBEOF
+#!/bin/bash
+# Only \`docker ps --filter <ancestor> --format ...\` is understood here.
+[[ "\$1" == ps ]] || exit 64
+[[ " \$* " == *" ${ancestor} "* ]] || exit 65
+cat <<'PAYLOAD'
+${names}
+PAYLOAD
+STUBEOF
+    chmod +x "${STUB}/docker"
+
+    local got=0 out
+    out="$(PATH="${STUB}:${PATH}" "${WATCHTOWER_PREFLIGHT}" "${STUB}/watchtower-image" 2>&1)" || got=$?
+
+    if [[ "${got}" -eq "${want}" ]]; then
+        ok "${name}"
+    else
+        not_ok "${name} (wanted exit ${want}, got ${got})
+           ${out}"
+    fi
+}
+
+preflight_with "a machine running no Watchtower starts one" 0 ""
+
+# The case the whole script exists for: a Watchtower the operator deployed from
+# Portainer, under a name only they chose, from the image already in the store.
+preflight_with "a Watchtower under another name refuses a second one" 1 "operator-watchtower"
+
+preflight_with "a name that merely contains ours is still another Watchtower" 1 "my-kantainer-watchtower"
+
+# Our own container is the one the unit's `docker rm --force` deals with. If the
+# exclusion stopped excluding, a restart would refuse on the strength of the
+# copy it is about to replace - and the unit could never start again.
+preflight_with "our own stale container is not mistaken for a second Watchtower" 0 "kantainer-watchtower"
+
+preflight_with "ours among others still refuses" 1 "kantainer-watchtower
+operator-watchtower"
+
+# The refusal has to name the container the operator has to go and look at.
+# "One is already running" with no name sends them to `docker ps` to find out
+# which, which is the sentence this message replaces.
+cat > "${STUB}/docker" <<'STUBEOF'
+#!/bin/bash
+echo operator-watchtower
+STUBEOF
+chmod +x "${STUB}/docker"
+refusal="$(PATH="${STUB}:${PATH}" "${WATCHTOWER_PREFLIGHT}" "${STUB}/watchtower-image" 2>&1 || true)"
+
+assert "the refusal names the container already running" \
+    grep -Fq "operator-watchtower" <<< "${refusal}"
+
+assert "the refusal names the image it matched on" \
+    grep -Fq "${TEST_IMAGE}" <<< "${refusal}"
+
+# The argument the cases above pass is a default, not a requirement: the unit
+# passes none. So the default has to be the path build.sh writes, or every test
+# here would be exercising a file no machine ever reads.
+assert "the preflight's default is the path build.sh writes" \
+    grep -Fq 'IMAGE_FILE="${1:-/usr/lib/kantainer/watchtower-image}"' "${WATCHTOWER_PREFLIGHT}"
+
+assert "build.sh writes that path" \
+    grep -Fq "/usr/lib/kantainer/watchtower-image" <(code "${BUILD_SH}")
 
 echo
 echo "# The two update windows do not overlap"
