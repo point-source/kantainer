@@ -130,6 +130,7 @@ need to reach a registry. Deploy it as a stack:
 services:
   watchtower:
     image: ghcr.io/nicholas-fedor/watchtower:1.11.8
+    pull_policy: never
     environment:
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
@@ -159,8 +160,18 @@ That same line is how you run anything else that needs the socket — a reverse 
 container labels, a log viewer. The domain is named for what it is: a container the operator
 has decided may hold the socket.
 
-Keep the image tag in step with `WATCHTOWER_IMAGE` in `versions.env`, or the stack pulls a
-different Watchtower from the internet instead of using the one already on the machine.
+**`pull_policy: never` is the second line that matters.** Compose's default is `missing`,
+which fetches the tag from ghcr.io the moment the local image is not there — after a
+`docker system prune -a`, or a load that failed at boot. That is an unsigned image by tag,
+past the digest this repository pinned, and nothing tells you it happened. With
+`pull_policy: never` the deployment fails instead, saying `No such image`, and you can go and
+find out why the carried one is missing. The machine's own unit passes `--pull=never` for
+exactly this reason. If Portainer offers you a "pull latest image" toggle when you deploy,
+leave it off — it overrides this.
+
+Keep the image tag in step with `WATCHTOWER_IMAGE` in `versions.env`. The tag is how the
+stack finds the image already in Docker's store, so one that has drifted is one that is not
+there — which, with `pull_policy: never`, is now a refusal rather than a quiet fetch.
 
 ## Do not run two
 
@@ -168,9 +179,23 @@ Pick one: the unit, or your own stack. Two Watchtowers over one Docker engine bo
 the same container is out of date and both stop and recreate it, and the loser acts on a
 container that no longer exists.
 
-The unit checks for this and refuses to start if it finds another Watchtower already
-running, naming it. It matches on the image, so a stack using a different tag or a digest
-slips past — which is another reason to keep the tag in step.
+The check runs **one way round**. The unit refuses to start if it finds another Watchtower
+already running, naming it — so a machine where you deployed your own stack first will not
+start the unit on top of it. Nothing checks the other direction: Portainer deploys whatever
+you ask it to, and it does not know the unit exists. If the unit is running, stop it before
+you deploy your own:
+
+```bash
+sudo systemctl disable --now kantainer-watchtower
+sudo rm /etc/kantainer/watchtower-enabled
+```
+
+Removing the gate file as well is what stops it coming back at the next boot. Clear
+`KANTAINER_WATCHTOWER_ENABLED` in your configuration file too, or the next machine you flash
+starts one.
+
+The unit's check matches on the image, so a stack using a different tag or a digest slips
+past even in the direction it does cover — which is another reason to keep the tag in step.
 
 ## When something looks wrong
 

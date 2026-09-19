@@ -504,8 +504,9 @@ Two things switch it on, and they are alternatives rather than a pair. The confi
 file carries an optional field, and a machine flashed with it set starts Watchtower from
 first boot. An operator who did not set it can deploy Watchtower themselves from Portainer,
 from the image already in the store, or create the gate file and start the unit over SSH.
-Starting a second one when the first is already running is refused, with a message naming
-the one already there.
+Starting the unit when another Watchtower is already running is refused, with a message
+naming the one already there. That check runs one way round: it is the unit's own start-up, so it cannot govern what the operator
+deploys from Portainer afterwards, and the guide tells them to stop the unit first.
 
 Once running, it updates only the containers the operator has labelled for it. Each night it
 checks those, replaces any whose image has a newer version, and deletes the image it

@@ -42,6 +42,8 @@ WATCHTOWER_PREFLIGHT="${SYSTEM_FILES}/usr/libexec/kantainer/watchtower-preflight
 WATCHTOWER_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower.service"
 WATCHTOWER_LOAD_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-watchtower-load.service"
 OVERNIGHT="${SYSTEM_FILES}/usr/lib/systemd/system/bootc-fetch-apply-updates.timer.d/10-kantainer-overnight.conf"
+PORTAINER_UNIT="${SYSTEM_FILES}/usr/lib/systemd/system/kantainer-portainer.service"
+DOCS="${REPO_ROOT}/docs/watchtower.md"
 BUTANE_FRAGMENT="${REPO_ROOT}/butane/watchtower.bu.tmpl"
 DEFAULTS_ENV="${SYSTEM_FILES}/usr/lib/kantainer/watchtower-defaults.env"
 
@@ -369,7 +371,46 @@ assert "docs/watchtower.md names the pinned Watchtower" \
     grep -Fq "${WATCHTOWER_IMAGE}:${WATCHTOWER_TAG}" "${REPO_ROOT}/docs/watchtower.md"
 
 assert "docs/watchtower.md names the domain an operator must set" \
-    grep -Fq "label=type:${DOMAIN}" "${REPO_ROOT}/docs/watchtower.md"
+    grep -Fq "label=type:${DOMAIN}" "${DOCS}"
+
+# The stack the guide hands the operator must refuse to reach a registry, for the
+# same reason watchtower-run passes --pull=never. Compose defaults to `missing`,
+# which fetches the tag from ghcr.io the moment the carried image is not there -
+# unsigned, by tag, past the digest versions.env pinned, and silently.
+assert "the documented stack refuses to pull" \
+    grep -Fq "pull_policy: never" "${DOCS}"
+
+# The guide's refusal is one-directional and has to say so. The preflight runs at
+# the unit's start-up, so it cannot govern a stack deployed afterwards - an
+# operator told only that "a second one is refused" would deploy one on top of a
+# running unit and be told nothing.
+assert "the guide says to stop the unit before deploying your own" \
+    grep -Fq "systemctl disable --now kantainer-watchtower" "${DOCS}"
+
+echo
+echo "# Portainer does not serve before the image it would deploy is loaded"
+
+# "Deploy it yourself from Portainer" only avoids a registry while the image is
+# in Docker's store. Portainer answering is the moment an operator can ask for
+# it, so a boot that serves Portainer first is a boot where the documented stack
+# falls back to ghcr.io - and pull_policy: never turns that into a failed
+# deployment rather than a silent one, which is better but still not right.
+assert "the loader is ordered before Portainer" \
+    grep -Fxq "Before=kantainer-portainer.service" "${WATCHTOWER_LOAD_UNIT}"
+
+# Ordering only. A load that failed must leave Portainer late, not absent:
+# Portainer serving is the machine's job and Watchtower is what it can do
+# without.
+refute "Portainer does not depend on the Watchtower image loading" \
+    grep -qE '^(Requires|Requisite|BindsTo)=.*kantainer-watchtower-load' "${PORTAINER_UNIT}"
+
+refute "the loader does not pull Portainer in behind it" \
+    grep -qE '^(Requires|Requisite|BindsTo)=.*kantainer-portainer\.service' "${WATCHTOWER_LOAD_UNIT}"
+
+# Portainer now waits for this unit, so an unbounded wait here is a machine that
+# never serves.
+assert "the loader cannot block Portainer forever" \
+    grep -qE '^TimeoutStartSec=[0-9]' "${WATCHTOWER_LOAD_UNIT}"
 
 echo
 if [[ "${failures}" -eq 0 ]]; then
