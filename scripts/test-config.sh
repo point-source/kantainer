@@ -54,6 +54,7 @@ config() {
         [KANTAINER_TARGET_DRIVE]=""
         [KANTAINER_WIFI_SSID]=""
         [KANTAINER_WIFI_PASSPHRASE]=""
+        [KANTAINER_WATCHTOWER_ENABLED]=""
     )
 
     local override key
@@ -280,6 +281,41 @@ advises "says what a machine with no console password costs" \
 advises "says the console password is set, without printing it" \
     "Console password is set" \
     "KANTAINER_CONSOLE_PASSWORD=${TEST_CONSOLE_PASSWORD}"
+
+### KANTAINER_WATCHTOWER_ENABLED (§spec:container-updates)
+
+# `yes`, `1`, `True` and `on` all read as agreement to a person, and the
+# renderer tests for none of them. Accepting one quietly would produce a machine
+# that does not update its containers and an operator certain that it does -
+# and nothing on that machine contradicts them, because a Watchtower that was
+# never switched on looks exactly like one with nothing to do.
+accepts "accepts a machine that asked for Watchtower" \
+    "KANTAINER_WATCHTOWER_ENABLED=true"
+
+# false is accepted alongside blank so the decision can be written down rather
+# than left as an absent line the next reader has to interpret.
+accepts "accepts a machine that wrote down declining it" \
+    "KANTAINER_WATCHTOWER_ENABLED=false"
+
+accepts "accepts a machine that left the field blank" \
+    "KANTAINER_WATCHTOWER_ENABLED="
+
+refuses "refuses a yes that is not the word the renderer tests for" \
+    "KANTAINER_WATCHTOWER_ENABLED" "KANTAINER_WATCHTOWER_ENABLED=yes"
+
+refuses "refuses a capitalised True" \
+    "KANTAINER_WATCHTOWER_ENABLED" "KANTAINER_WATCHTOWER_ENABLED=True"
+
+refuses "refuses a numeric 1" \
+    "KANTAINER_WATCHTOWER_ENABLED" "KANTAINER_WATCHTOWER_ENABLED=1"
+
+advises "names the label when Watchtower is switched on" \
+    "com.centurylinklabs.watchtower.enable=true" \
+    "KANTAINER_WATCHTOWER_ENABLED=true"
+
+advises "says Watchtower is carried but not running when it is off" \
+    "Watchtower will not run" \
+    "KANTAINER_WATCHTOWER_ENABLED="
 
 ### render-ignition.sh
 
@@ -673,6 +709,70 @@ else
     not_ok "a Portainer password containing & \\ | % survives intact"
 fi
 
+### the Watchtower switch (§spec:container-updates)
+
+# THE GATE IS A FILE, and nothing reads what is in it: kantainer-watchtower's
+# ConditionPathExists asks only whether the path is there. So the two states are
+# a file that exists and a file that does not, and every assertion below is
+# about which of those the renderer produced.
+#
+# scripts/test-watchtower.sh checks that the renderer's source says `== "true"`.
+# That is a different question from what a render actually contains, and a
+# regression in the fragment, the append, or the Butane template would leave it
+# passing while every machine flashed from this repository either ran Watchtower
+# unasked or refused to run it when asked.
+GATE=/etc/kantainer/watchtower-enabled
+
+render "KANTAINER_WATCHTOWER_ENABLED=true"
+
+assert_jq "a machine that asked for Watchtower carries the gate file" \
+    '[.storage.files[] | select(.path == "'"${GATE}"'")] | length' "1"
+assert_jq "the gate file is readable by the unit that reads it" \
+    '.storage.files[] | select(.path == "'"${GATE}"'") | "\(.mode) \(.user.id):\(.group.id)"' "420 0:0"
+
+# The file says what it is for, because the one thing an operator cannot learn
+# by opening it is that its contents do not matter.
+if [[ "$(file_at "${GATE}")" == *"rm ${GATE}"* ]]; then
+    ok "the gate file tells whoever opens it how to switch Watchtower off"
+else
+    not_ok "the gate file tells whoever opens it how to switch Watchtower off"
+fi
+
+cp "${WORK}/out.json" "${WORK}/watchtower-on.json"
+
+# A machine that did not ask carries NO TRACE of Watchtower, exactly as a wired
+# machine carries no wireless profile. Absent, not present-and-empty: the unit
+# would start on a gate file containing the word false.
+render "KANTAINER_WATCHTOWER_ENABLED=false"
+
+assert_jq "a machine that declined Watchtower carries no gate file" \
+    '[.storage.files[] | select(.path == "'"${GATE}"'")] | length' "0"
+
+cp "${WORK}/out.json" "${WORK}/watchtower-off.json"
+
+render "KANTAINER_WATCHTOWER_ENABLED="
+
+assert_jq "a machine that left the field blank carries no gate file" \
+    '[.storage.files[] | select(.path == "'"${GATE}"'")] | length' "0"
+
+# false and blank are the same machine, and true differs from them by the gate
+# file ALONE. Compared whole rather than by the one path, so a fragment that
+# also moved a unit, a mode or an owner is caught here rather than on a machine.
+if cmp -s "${WORK}/out.json" "${WORK}/watchtower-off.json"; then
+    ok "writing false down renders the same machine as leaving it blank"
+else
+    not_ok "writing false down renders the same machine as leaving it blank"
+fi
+
+difference="$(jq -S '.storage.files[].path' "${WORK}/watchtower-on.json" |
+    diff - <(jq -S '.storage.files[].path' "${WORK}/watchtower-off.json") || true)"
+if [[ "$(grep -c '^[<>]' <<< "${difference}")" -eq 1 && "${difference}" == *"${GATE}"* ]]; then
+    ok "switching Watchtower on adds the gate file and nothing else"
+else
+    not_ok "switching Watchtower on changes more than the gate file:
+${difference}"
+fi
+
 ### refusals
 
 # The renderer applies the validator's rules, so `just render` and `just flash`
@@ -704,6 +804,12 @@ render_refuses "refuses to render without an SSH public key" "KANTAINER_SSH_PUBL
     "KANTAINER_SSH_PUBLIC_KEY="
 render_refuses "refuses to render a password Portainer would reject" "KANTAINER_PORTAINER_PASSWORD" \
     "KANTAINER_PORTAINER_PASSWORD=hunt"
+
+# The renderer tests for `true` and nothing else, so anything it does not refuse
+# and does not recognise renders a machine with Watchtower silently off. The
+# refusal is what makes `== "true"` safe to write.
+render_refuses "refuses to render a Watchtower switch it would silently ignore" \
+    "KANTAINER_WATCHTOWER_ENABLED" "KANTAINER_WATCHTOWER_ENABLED=yes"
 
 ### a config the operator could publish by accident
 

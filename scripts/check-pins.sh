@@ -31,7 +31,8 @@ fail() {
 
 for var in UCORE_IMAGE UCORE_TAG UCORE_DIGEST FCOS_STREAM FCOS_VERSION FCOS_ISO_SHA256 \
     PORTAINER_IMAGE PORTAINER_TAG PORTAINER_DIGEST \
-    COREOS_INSTALLER_IMAGE COREOS_INSTALLER_TAG COREOS_INSTALLER_DIGEST; do
+    COREOS_INSTALLER_IMAGE COREOS_INSTALLER_TAG COREOS_INSTALLER_DIGEST \
+    WATCHTOWER_IMAGE WATCHTOWER_TAG WATCHTOWER_DIGEST; do
     [[ -n "${!var:-}" ]] || fail "versions.env does not set ${var}"
 done
 
@@ -97,6 +98,14 @@ require_digest PORTAINER_DIGEST
 # same command verifies the installer against (SPEC.md §spec:installer-media).
 require_digest COREOS_INSTALLER_DIGEST
 
+# Watchtower is carried the same way Portainer is, and held to the same pin
+# (SPEC.md §spec:container-updates). It earns the check twice over: it is the one
+# image on the machine that runs holding the Docker control socket, which is
+# root-equivalent, and watchtower-run passes --pull=never so a reference that
+# stopped naming these bytes cannot be corrected at runtime - it just fails to
+# start, on a machine, with nobody watching.
+require_digest WATCHTOWER_DIGEST
+
 [[ "${FCOS_ISO_SHA256}" =~ ^[0-9a-f]{64}$ ]] ||
     fail "FCOS_ISO_SHA256 is not a sha256 checksum: ${FCOS_ISO_SHA256}
     It is the bare 64-character digest of the live ISO, with no sha256: prefix."
@@ -114,6 +123,11 @@ grep -q '${PORTAINER_DIGEST}' "${build_sh}" ||
     fail "build_files/build.sh does not read PORTAINER_DIGEST from versions.env
     Pull Portainer as \${PORTAINER_IMAGE}@\${PORTAINER_DIGEST}, never a literal digest."
 
+# shellcheck disable=SC2016
+grep -q '${WATCHTOWER_DIGEST}' "${build_sh}" ||
+    fail "build_files/build.sh does not read WATCHTOWER_DIGEST from versions.env
+    Pull Watchtower as \${WATCHTOWER_IMAGE}@\${WATCHTOWER_DIGEST}, never a literal digest."
+
 if literal="$(grep -nE 'sha256:[0-9a-f]{64}' "${build_sh}")"; then
     fail "build_files/build.sh carries a literal digest:
     ${literal}
@@ -129,4 +143,4 @@ fi
 openssl pkey -pubin -noout -in "${ROOT}/cosign.pub" 2> /dev/null ||
     fail "cosign.pub does not parse as a public key"
 
-echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}; Portainer ${PORTAINER_TAG} and coreos-installer ${COREOS_INSTALLER_TAG} pinned by digest"
+echo "check-pins: ${UCORE_IMAGE}:${UCORE_TAG} pinned by digest; Fedora CoreOS ${FCOS_STREAM} ${FCOS_VERSION}; Portainer ${PORTAINER_TAG}, Watchtower ${WATCHTOWER_TAG} and coreos-installer ${COREOS_INSTALLER_TAG} pinned by digest"

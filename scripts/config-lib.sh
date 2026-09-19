@@ -24,6 +24,7 @@ KANTAINER_FIELDS=(
     KANTAINER_TARGET_DRIVE
     KANTAINER_WIFI_SSID
     KANTAINER_WIFI_PASSPHRASE
+    KANTAINER_WATCHTOWER_ENABLED
 )
 
 # Portainer's own minimum for the initial administrator password. Their setup
@@ -211,6 +212,32 @@ kantainer_validate_config() {
     That range is WPA-PSK's, not ours: the machine's supplicant refuses anything
     outside it. It counts bytes, so an accented or non-Latin character costs more
     than one."
+    fi
+
+    # Watchtower is off unless the operator writes exactly `true`
+    # (SPEC.md §spec:container-updates).
+    #
+    # THE REFUSAL IS THE POINT. `yes`, `1`, `True` and `on` all read as agreement
+    # to a person and none of them is what the installer tests for, so a config
+    # accepting them quietly would produce a machine that does not update its
+    # containers and an operator certain that it does. Nothing on the machine
+    # would contradict them: an unswitched Watchtower and a healthy one both look
+    # like a machine that is running fine.
+    #
+    # `false` is accepted alongside blank so that the off state can be written
+    # down. An operator who decided against it should be able to record that
+    # decision in the file rather than delete the line and leave the next reader
+    # wondering whether it was ever considered.
+    if [[ -n "${KANTAINER_WATCHTOWER_ENABLED}" ]]; then
+        case "${KANTAINER_WATCHTOWER_ENABLED}" in
+            true | false) ;;
+            *)
+                kantainer_fail "KANTAINER_WATCHTOWER_ENABLED must be true or false, not: ${KANTAINER_WATCHTOWER_ENABLED}
+    Lower case, exactly. Leave it blank or write false to leave Watchtower
+    switched off - it is carried in the image either way, and can be started on
+    the machine or from Portainer later."
+                ;;
+        esac
     fi
 
     kantainer_refuse_if_publishable "${1:-}"

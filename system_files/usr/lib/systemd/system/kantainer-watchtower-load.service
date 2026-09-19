@@ -1,0 +1,38 @@
+[Unit]
+Description=Load the Watchtower image carried in the OS image into Docker
+Documentation=https://github.com/point-source/kantainer
+After=docker.service
+Requires=docker.service
+Before=kantainer-watchtower.service
+
+# ORDERED BEFORE PORTAINER TOO, which is not obvious and is the whole point of
+# carrying the archive. "Deploy it yourself from Portainer" only avoids a
+# registry while the image is already in Docker's store, and Portainer's web
+# interface answering is the moment an operator can ask for it. Without this the
+# two units start in parallel and a slow boot serves a Portainer whose store does
+# not have Watchtower yet - where the documented stack falls back to pulling
+# ghcr.io by tag, past the digest versions.env pinned.
+#
+# Ordering only: no Requires, no Wants. A load that fails must not take Portainer
+# down with it - Portainer serving is the machine's job, and Watchtower is the
+# thing it can do without. Portainer is then late rather than absent, and the
+# failure is this unit's to report.
+Before=kantainer-portainer.service
+
+# DELIBERATELY NOT CONDITIONED ON /etc/kantainer/watchtower-enabled.
+# kantainer-watchtower.service is; this is not. Loading the image is what lets an
+# operator deploy Watchtower from Portainer without reaching a registry, which is
+# the other half of SPEC.md §spec:container-updates.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/kantainer/watchtower-load
+
+# Portainer now waits for this unit, so this unit is not allowed to wait
+# forever. `docker load` of a carried archive is a second's work; anything past
+# this is a fault, and failing is what lets Portainer get on with starting.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

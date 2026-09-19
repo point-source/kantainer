@@ -1,0 +1,81 @@
+## The domain for containers the operator has decided may hold the Docker
+## socket (SPEC.md §spec:container-updates).
+##
+## The machine stays Enforcing and container_t - every container on the machine -
+## still has no route to the Docker socket. This module does not change that. It
+## adds a SECOND domain, which nothing runs in unless something names it:
+##
+##     docker run --security-opt label=type:kantainer_socket_client_t ...
+##
+## kantainer-watchtower.service names it. An operator deploying a stack from
+## Portainer can name it too, which is the supported way to run anything else
+## that needs the socket - a reverse proxy watching for container labels, a log
+## viewer - without handing the socket to every container on the machine.
+##
+## WHY THIS IS NOT A SECOND kantainer_portainer_t. Portainer's domain also owns
+## kantainer_portainer_file_t: its database, the administrator hash and its TLS
+## key. Putting Watchtower there would give it that too. This domain owns no file
+## type anyone labels anything with, so it carries the socket exemption and
+## nothing else.
+##
+## WHAT THIS DOMAIN IS AND IS NOT WORTH. A container holding the Docker socket is
+## root-equivalent: it can start another container with any label it likes and
+## mount anything. The separation here is NOT a wall around a socket holder, and
+## reading it as one would be a mistake. It is the difference between one named
+## opt-in and every container the operator ever deploys through Portainer, which
+## is the same argument §spec:portainer-service made for Portainer's own domain.
+##
+## Deciding a container may hold the socket is therefore the same decision as
+## giving it root on the machine. docs/watchtower.md says so to the operator.
+
+policy_module(kantainer_socket_client, 1.0.0)
+
+gen_require(`
+	attribute container_domain;
+	attribute container_net_domain;
+	attribute container_file_type;
+	type container_runtime_t;
+	type container_file_t;
+')
+
+# The template needs a file type named after this domain's prefix. Nothing on the
+# machine is labelled with it and no .fc file places it: this domain keeps no
+# state of its own. It exists so the template below has its second argument.
+type kantainer_socket_client_file_t;
+container_file(kantainer_socket_client_file_t)
+
+container_domain_template(kantainer_socket_client, kantainer_socket_client)
+
+# Watchtower reaches registries itself to compare digests before asking the
+# daemon to pull, so this domain talks to the network. container_domain alone
+# cannot open a socket - container-selinux keeps network access on a separate
+# attribute - and without this the container starts and then fails every check
+# with a DNS error that looks like a broken network rather than a policy denial.
+typeattribute kantainer_socket_client_t container_net_domain;
+
+# THE ACCESS EVERY CONTAINER HAS, WHICH THIS DOMAIN DOES NOT INHERIT.
+#
+# Identical in purpose and in consequence to the block in
+# kantainer_portainer.te, which explains it at length. The short version, because
+# the `map` line is the one that costs a day: container-selinux grants
+# container_domain `entrypoint` on container_file_t, so execve succeeds and the
+# loader's mmap of the binary is then denied. The process dies of SIGSEGV before
+# it can log a word - systemd reports status=139, the journal carries nothing
+# from the container at all, and the only evidence on the machine is the AVC.
+#
+# This widens nothing: MCS gives each container its own categories, so what is
+# granted here is what any container already has over its own layers.
+manage_dirs_pattern(kantainer_socket_client_t, container_file_t, container_file_t)
+manage_files_pattern(kantainer_socket_client_t, container_file_t, container_file_t)
+manage_lnk_files_pattern(kantainer_socket_client_t, container_file_t, container_file_t)
+exec_files_pattern(kantainer_socket_client_t, container_file_t, container_file_t)
+allow kantainer_socket_client_t container_file_t:dir_file_class_set map;
+
+# Docker starts containers with NoNewPrivileges, which needs this transition.
+container_runtime_typebounds(kantainer_socket_client_t)
+
+# The exemption itself: writing the socket file, and connecting to the daemon
+# behind it. Both come from container_stream_connect(), which container-selinux
+# maintains for exactly this purpose - the rules are not written out here, so
+# they stay correct as upstream changes them.
+container_stream_connect(kantainer_socket_client_t)

@@ -87,6 +87,22 @@ expect 1 "rejects a missing coreos-installer pin" \
 expect 1 "rejects a coreos-installer pin that is not a digest" \
     "sed -i 's|^COREOS_INSTALLER_DIGEST=.*|COREOS_INSTALLER_DIGEST=release|' versions.env"
 
+# Watchtower is the one carried image that runs holding the Docker control
+# socket (SPEC.md §spec:container-updates), and watchtower-run passes
+# --pull=never - so an unpinned reference is not a slower update, it is a
+# machine that cannot start Watchtower at all and says so to nobody.
+expect 1 "rejects a missing Watchtower pin" \
+    "sed -i 's|^WATCHTOWER_DIGEST=.*|WATCHTOWER_DIGEST=|' versions.env"
+
+expect 1 "rejects a Watchtower pin that is not a digest" \
+    "sed -i 's|^WATCHTOWER_DIGEST=.*|WATCHTOWER_DIGEST=latest|' versions.env"
+
+expect 1 "rejects a missing Watchtower tag" \
+    "sed -i 's|^WATCHTOWER_TAG=.*|WATCHTOWER_TAG=|' versions.env"
+
+expect 1 "rejects a Watchtower digest hardcoded in the build" \
+    "sed -i 's|\${WATCHTOWER_DIGEST}|sha256:0000000000000000000000000000000000000000000000000000000000000000|' build_files/build.sh"
+
 echo
 if [[ "${failures}" -eq 0 ]]; then
     echo "all pin checks behave as intended"

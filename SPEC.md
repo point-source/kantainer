@@ -230,7 +230,8 @@ The repository carries a configuration template. The operator copies it, fills i
 keeps their copy out of version control. It is the only place machine-specific values
 exist. `kantainer.conf.example` is the authoritative list of what it carries: a login
 account, an SSH public key and the Portainer administrator password are required; a target
-drive, a wireless network name and passphrase, and a console password are optional.
+drive, a wireless network name and passphrase, a console password and whether the machine
+runs Watchtower (§spec:container-updates) are optional.
 
 The file is parsed rather than executed, and each value is taken literally to the end of its
 line. The operator is not asked to learn shell quoting for a password.
@@ -241,7 +242,10 @@ without demanding an immediate change. The refusal names the offending field and
 non-zero. Nothing is written — not a USB stick, not a rendered configuration, not a temporary
 file left behind. The console password is the one field whose absence is reported rather than
 refused: a machine without one is a supported choice, and the check says what that choice
-costs (§spec:console-password).
+costs (§spec:console-password). The Watchtower switch is refused unless it is exactly `true`
+or `false`: `yes`, `1` and `on` all read as agreement to a person and none of them is what
+the installer tests for, so accepting them quietly would produce a machine that does not
+update its containers and an operator certain that it does.
 
 **Decision and constraint.** The Portainer password is required rather than optional, which
 departs from §req:sc:portainer-login-without-watching and §req:priorities, where it ranks sixth
@@ -374,8 +378,11 @@ Podman is present, because the base image carries it, and is not used for worklo
 The machine's firewall accepts connections on the Portainer interface and on SSH, and
 nothing else. Portainer's agent-tunnel and plain-HTTP interfaces are not exposed.
 
-Mandatory access control remains enforcing on the machine as a whole. The single exemption
-is Portainer's own access to the Docker control socket; see §spec:portainer-service.
+Mandatory access control remains enforcing on the machine as a whole, and no container
+reaches the Docker control socket by default. Two named domains may, and a container enters
+one only by asking for it: Portainer's own (§spec:portainer-service), and one shared by
+Watchtower and anything else the operator decides may hold the socket
+(§spec:container-updates).
 
 **Decision and constraint.** §req:problem-statement makes running Docker containers the
 machine's one job. The base image ships Docker but deliberately leaves it switched off,
@@ -480,6 +487,144 @@ rather than being deleted. The stick is a secret-bearing object either way, whic
 Cites §req:sc:portainer-in-a-browser, §req:sc:portainer-login-without-watching,
 §req:sc:containers-survive-reboot, §req:sc:data-survives-updates, §req:constraints,
 §req:quality-attributes.
+
+## Container updates §spec:container-updates
+
+*Status: complete* — not yet confirmed on real hardware: the gate, the SELinux domain and
+the nightly schedule all need an enforcing kernel and a boot, which the build environment
+has neither of.
+
+The machine can update the containers the operator deploys, and does not unless they ask.
+
+Watchtower is part of the image on the same terms as Portainer: present on disk before the
+machine ever boots, pinned by tag and digest in the repository, never downloaded onto the
+machine. It is loaded into Docker on every boot whether or not it is switched on.
+
+Two things switch it on, and they are alternatives rather than a pair. The configuration
+file carries an optional field, and a machine flashed with it set starts Watchtower from
+first boot. An operator who did not set it can deploy Watchtower themselves from Portainer,
+from the image already in the store, or create the gate file and start the unit over SSH.
+Starting the unit when another Watchtower is already running is refused, with a message
+naming the one already there, and refused too when the engine cannot be asked. That check
+runs one way round: it is the unit's own start-up, so it cannot govern what the operator
+deploys from Portainer afterwards, and the guide tells them to stop the unit first.
+
+Once running, it updates only the containers the operator has labelled for it. Each night it
+checks those, replaces any whose image has a newer version, and deletes the image it
+replaced. Switching Watchtower on and labelling nothing changes nothing. The check is at
+05:00, clear of the operating system's own update window and the reboot that ends it
+(§spec:os-updates).
+
+These defaults live in a file the image owns, and the operator can override any of them in a
+file of their own on the machine — the schedule, notifications, a monitor-only mode, or the
+scope itself. An override the operator writes takes effect; none is accepted and then
+ignored.
+
+Portainer and Watchtower itself carry an exclusion label. Under the default scope it is
+redundant, since neither is labelled in. It stays because the operator can widen the scope
+to every container, and from that moment the label is the only thing keeping Watchtower off
+two containers that are pinned in this repository and move only when the image moves.
+
+Watchtower reaches the Docker control socket, which is root-equivalent access to the
+machine, and so needs the same exemption from mandatory access control that Portainer needs.
+The exemption is a second domain, which nothing runs in unless something names it. The rest
+of the machine stays enforcing, and `container_t` — every container the operator deploys —
+still has no route to the socket.
+
+**Decision and constraint.** §req:quality-attributes asks for a machine that keeps itself
+alive without attention, and §spec:os-updates already delivers that for the operating
+system. The containers on top of it were the half with no answer: an operator who deployed
+something through Portainer had no way to get its fixes short of redeploying it by hand.
+
+It is off by default because it is not the same kind of update as the operating system's.
+That one is a signed image this repository built, with a health check and an automatic
+rollback behind it (§spec:boot-health-and-rollback). This one is whatever a third party
+pushed to a tag, applied unattended, with nothing to roll back to — Docker keeps no previous
+deployment. An operator who wants that should say so; an operator who does not should not
+discover it from a container that stopped working overnight.
+
+The scope is opt-in by label because the two ways of getting it wrong are not the same size.
+An operator who forgets to label a container in leaves it un-updated, which is where it
+already was. An operator who forgets to label one out — under a watch-everything scope —
+finds it stopped, replaced and restarted overnight with nobody watching and nothing to roll
+back to. A switch that asks for a label per container looks less switched on than it is, and
+`just config-check` names the label for exactly that reason: the likelier surprise is
+Watchtower running and updating nothing.
+
+The defaults are environment variables in an image-owned file, passed ahead of the
+operator's own, rather than flags on Watchtower's command line. Both obvious alternatives
+break the override silently, and both were verified against the pinned image rather than
+assumed: Watchtower lets a flag win over its own environment variable, and Docker lets
+`--env` win over every `--env-file` regardless of order. Either way the operator's setting
+would be accepted and ignored with nothing reporting it. Docker does let a later env file
+override an earlier one, which is the whole mechanism, and `scripts/test-watchtower.sh`
+fails if a default reappears on the command line or the two files swap order.
+
+The unit restarts Watchtower only when it exits in failure, for the same reason. Watchtower's
+scheduled mode never exits on its own, so the only clean exit the unit can see is one the
+operator asked for by overriding it into a single pass — and restarting that would turn a
+single pass into either a continuous one or a unit in `failed`, without anything reporting
+that the setting had been overruled. A Watchtower killed out from under systemd still exits
+non-zero and is still brought back.
+
+A second SELinux domain rather than reusing Portainer's: Portainer's domain also owns
+Portainer's database, administrator hash and TLS key, and Watchtower has no business with
+any of them. The new domain owns no file type at all. It is also reusable, which is what
+makes "deploy it yourself from Portainer" a supported path rather than a trick — anything
+else the operator runs that needs the socket names the same domain.
+
+That separation is worth exactly what it is worth and no more. A container holding the
+Docker socket is root-equivalent and can start another container with any label it likes.
+The domain is not a wall around a socket holder; it is the difference between one named
+opt-in and every container on the machine, which is the argument §spec:portainer-service
+already made.
+
+**Alternatives rejected.** Granting the socket to `container_t` was rejected for the reason
+§spec:portainer-service rejected it: it hands root-equivalent access to anything the
+operator ever deploys. `--security-opt label=disable`, which is the usual advice for this
+denial, was rejected as the same trade made less visibly — it runs the container unconfined
+rather than in a domain anyone can read.
+
+Shipping Watchtower enabled was rejected as changing what an existing machine does on the
+strength of an image update.
+
+Watching every container and excluding by label was rejected as the larger of the two
+mistakes (above). It remains one line away for an operator who wants it.
+
+A systemd drop-in as the way to change Watchtower's options was rejected: overriding
+`ExecStart` forks the whole command line — the SELinux opt-in, `--pull=never`, the socket
+mount — into `/etc`, where a later change to the image's copy never reaches it. Not shipping it at all and documenting the label-and-domain
+recipe was rejected as leaving the operator to assemble from documentation the one
+arrangement this repository is in a position to get right.
+
+Updating Portainer with Watchtower was rejected outright. Portainer is digest-pinned inside
+the OS image and started by systemd with `--pull=never`; a Watchtower recreating it would
+pull an unsigned image from Docker Hub by tag, past that pin, and then trade the container
+name back and forth with systemd until the service gave up. The exclusion label prevents it
+under any scope the operator can choose, and is not optional.
+
+**Tradeoffs.** The image carries a second container archive it may never run, costing space
+in the image and in Docker's store, and about a second of boot time loading it. Switching
+Watchtower on by editing a file on the machine rather than through Portainer means an
+operator who only ever uses the web interface has to either use the configuration file at
+flash time or deploy their own copy — the gate is a file because at Ignition time the unit
+does not exist yet to be enabled.
+
+Unattended container updates can break a service overnight with nobody watching, and nothing
+here rolls that back. That is the cost of the feature rather than a defect in it, which is
+why it is off unless asked for, opt-in per container once it is on, and why both the
+configuration template and `just config-check` say so in those words.
+
+Opt-in has a quiet failure of its own: a container deployed later and never labelled is never
+updated, and nothing reports it. That was judged the right way round to be quiet.
+
+The operator's override file is a second place Watchtower's behaviour is decided, and
+`docker inspect` shows both the default and the override as separate entries even though
+only the later one takes effect. The documentation says so, because it is the first thing
+someone debugging an override will look at.
+
+Cites §req:problem-statement, §req:quality-attributes, §req:constraints,
+§req:sc:containers-survive-reboot, §req:sc:data-survives-updates.
 
 ## Remote access §spec:remote-access
 
@@ -966,14 +1111,21 @@ Cites §req:sc:push-publishes, §req:quality-attributes, §req:constraints.
 
 ## Operator documentation §spec:operator-documentation
 
-*Status: complete* — the README indexes the rebuild, flash, and verification procedures. The
-single flash guide covers the supported Linux and macOS host branches, every target-safety and
-write-integrity outcome, and the final manual eject; repository-owned references are checked by
-`just ci`.
+*Status: complete* — the README indexes the rebuild, flash, and verification procedures, and the
+container-update guide beside them. The single flash guide covers the supported Linux and macOS
+host branches, every target-safety and write-integrity outcome, and the final manual eject;
+repository-owned references are checked by `just ci`.
 
 The three procedures cover rebuilding, flashing, and confirming Portainer after first boot. The
 verification guide also distinguishes a machine that stopped during installation from one still
 working.
+
+A fourth guide covers unattended container updates (§spec:container-updates). It states what
+Watchtower does once a night, that it touches only containers labelled in and nothing rolls back
+one it breaks, how to change its defaults and what widening the scope or moving the schedule
+costs, both ways to switch it on, and the SELinux line an operator running it from Portainer
+themselves will otherwise spend a day on. It says in the operator's own terms that the agent
+holds root-equivalent access to the machine.
 
 The flash procedure states the supported operator hosts and their prerequisites. For macOS it
 shows how to list external physical disks, requires the full `/dev/diskN` path, explains the
@@ -987,7 +1139,10 @@ selection and Podman behavior.
 configuration field, or relative link. It checks references rather than prose semantics; ports,
 first-boot behavior, and procedure order still require review.
 
-**Decision and constraint.** §req:sc:three-documents requires exactly these three documents.
+**Decision and constraint.** §req:sc:three-documents requires the first three documents, and
+§req:sc:watchtower-documented the fourth. The Watchtower guide is separate rather than folded
+into one of the others because none of them is about a capability the operator chooses: it is
+the only page that exists to be read BEFORE a decision rather than during a procedure.
 The verification procedure covers failure because installation has a period in which correct
 progress and a stopped machine look alike from outside. The macOS branch shares the flash guide
 because both hosts expose the same commands and safety contract; separate guides would duplicate
@@ -1004,7 +1159,7 @@ were rejected because the repository cannot decide their meaning reliably.
 Host-specific branches make the flash procedure longer, but keep the shared configuration and
 first-boot sequence in one place.
 
-Cites §req:sc:three-documents, §req:sc:macos-host-commands,
+Cites §req:sc:three-documents, §req:sc:watchtower-documented, §req:sc:macos-host-commands,
 §req:sc:macos-ordinary-target-rules, §req:sc:macos-advanced-target,
 §req:sc:macos-unmount-and-write, §req:sc:macos-runtime-choice, §req:user-stories,
 §req:quality-attributes, §req:constraints, §req:priorities.

@@ -17,10 +17,13 @@
     },
   },
 
-  // versions.env is not a format Renovate understands natively, but three of its
+  // versions.env is not a format Renovate understands natively, but four of its
   // pins have to move on their own - an untracked pin is how a machine stays on a
   // version with a known authentication bypass, and how the installer half of this
   // system quietly ages out from under the image half.
+  //
+  // scripts/test-renovate-coverage.sh fails `just ci` if a pin family is added to
+  // versions.env without a manager here, so this list cannot quietly fall behind.
   "customManagers": [
     // Portainer. Both halves of the pin are captured in one match so Renovate
     // rewrites the tag and the digest together - they must never drift.
@@ -29,6 +32,19 @@
       "managerFilePatterns": ["/^versions\\.env$/"],
       "matchStrings": [
         "PORTAINER_IMAGE=(?<depName>.*?)\\nPORTAINER_TAG=(?<currentValue>.*?)\\nPORTAINER_DIGEST=(?<currentDigest>.*?)\\n",
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+    },
+
+    // Watchtower, carried in the image and started only if the operator asks
+    // (SPEC.md §spec:container-updates). Tag and digest captured together, as
+    // Portainer's are.
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": [
+        "WATCHTOWER_IMAGE=(?<depName>.*?)\\nWATCHTOWER_TAG=(?<currentValue>.*?)\\nWATCHTOWER_DIGEST=(?<currentDigest>.*?)\\n",
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker",

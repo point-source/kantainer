@@ -179,6 +179,22 @@ template="$(fill "${template}" \
     "@@ATTACH_IMAGE@@" "${ATTACH_IMAGE}")"
 printf '%s\n' "${template}" > "${BUTANE}"
 
+# Watchtower's switch exists only when the operator asked for it
+# (§spec:container-updates). A machine that did not carries no trace of it here,
+# and the unit inside the image stays skipped on its ConditionPathExists.
+#
+# Appended BEFORE the wireless fragment. Both are entries of the same files list
+# and YAML does not care about their order, but the wireless fragment is the one
+# butane/kantainer.bu.tmpl's closing comment tells the next reader to keep last -
+# so it is kept last in fact as well as in the comment.
+#
+# Tested for `true` exactly. config-lib.sh has already refused anything that is
+# neither true, false nor blank, so this is the only value that can reach here
+# and mean yes.
+if [[ "${KANTAINER_WATCHTOWER_ENABLED}" == "true" ]]; then
+    cat "${REPO_ROOT}/butane/watchtower.bu.tmpl" >> "${BUTANE}"
+fi
+
 # The wireless profile exists only when the operator named a network. A wired
 # machine carries no wireless configuration at all (§spec:network-attachment),
 # and wired DHCP needs none.

@@ -81,7 +81,28 @@ skopeo copy --quiet \
 printf '%s\n' "${PORTAINER_REF}" > /usr/lib/kantainer/portainer-image
 chmod 0644 /usr/lib/kantainer/portainer-image
 
-# Portainer's SELinux domain (SPEC.md §spec:portainer-service)
+# Watchtower, carried the same way (SPEC.md §spec:container-updates)
+#
+# CARRIED, NOT RUN. kantainer-watchtower.service is enabled but gated on a file
+# the operator's configuration writes, so an image built today starts no
+# Watchtower on any machine that did not ask for one.
+#
+# It is loaded into Docker on every boot regardless of that gate, because the
+# other way to switch it on is deploying it from Portainer - and a machine that
+# has to reach ghcr.io before the operator can do that is exactly the dependency
+# carrying the archive exists to remove.
+#
+# The ghcr.io reference has no docker.io/ prefix to strip, so unlike Portainer's
+# the whole reference is the readable name.
+WATCHTOWER_REF="${WATCHTOWER_IMAGE}:${WATCHTOWER_TAG}"
+
+skopeo copy --quiet \
+    "docker://${WATCHTOWER_IMAGE}@${WATCHTOWER_DIGEST}" \
+    "docker-archive:/usr/lib/kantainer/watchtower.tar:${WATCHTOWER_REF}"
+printf '%s\n' "${WATCHTOWER_REF}" > /usr/lib/kantainer/watchtower-image
+chmod 0644 /usr/lib/kantainer/watchtower-image
+
+# The SELinux domains (SPEC.md §spec:portainer-service, §spec:container-updates)
 #
 # selinux-policy-devel carries the refpolicy interfaces and the build Makefile.
 # It is removed again below: it is a build tool, and the installed machine has
@@ -89,11 +110,28 @@ chmod 0644 /usr/lib/kantainer/portainer-image
 dnf5 -y install selinux-policy-devel
 # /ctx is mounted read-only and the Makefile writes beside its source, so the
 # policy is built in /tmp (a tmpfs for this build).
+#
+# Both modules are copied in before either is built: refpolicy's Makefile
+# compiles what it finds in the directory, and building them in one pass is also
+# what makes a conflict between them - a duplicate type, a second filetrans -
+# fail here rather than on the machine.
 mkdir -p /tmp/selinux
-cp /ctx/selinux/kantainer_portainer.te /ctx/selinux/kantainer_portainer.fc /tmp/selinux/
-make -C /tmp/selinux -f /usr/share/selinux/devel/Makefile kantainer_portainer.pp
-install -Dpm 0644 /tmp/selinux/kantainer_portainer.pp \
-    /usr/share/selinux/packages/kantainer_portainer.pp
+cp /ctx/selinux/*.te /ctx/selinux/*.fc /tmp/selinux/
+
+# The module list comes from the directory rather than being written out here.
+# A .te added to selinux/ and forgotten in this file would not fail the build -
+# it would ship an image missing a domain, and the unit that names that domain
+# would fail to start on the machine with nobody watching.
+KANTAINER_SELINUX_MODULES=()
+for te in /tmp/selinux/*.te; do
+    KANTAINER_SELINUX_MODULES+=("$(basename "${te}" .te)")
+done
+
+for module in "${KANTAINER_SELINUX_MODULES[@]}"; do
+    make -C /tmp/selinux -f /usr/share/selinux/devel/Makefile "${module}.pp"
+    install -Dpm 0644 "/tmp/selinux/${module}.pp" \
+        "/usr/share/selinux/packages/${module}.pp"
+done
 
 # Force /etc/selinux/targeted fully into this layer before touching the policy
 # store. uCore does the same in its nvidia layer: the store transaction renames
@@ -104,9 +142,17 @@ rm -rf /etc/selinux/targeted
 mv /etc/selinux/targeted.rebuilt /etc/selinux/targeted
 
 # --noreload because there is no kernel policy to reload inside a build. On
-# Fedora the store lives under /etc, so the module ships inside the image and
-# needs no first-boot unit to install it.
-semodule --noreload --install /usr/share/selinux/packages/kantainer_portainer.pp
+# Fedora the store lives under /etc, so the modules ship inside the image and
+# need no first-boot unit to install them.
+#
+# One transaction for both, rather than a semodule call each: the store rebuild
+# is the slow part, and installing them together is also the only way a conflict
+# between the two is reported as one failure rather than a half-installed store.
+kantainer_module_packages=()
+for module in "${KANTAINER_SELINUX_MODULES[@]}"; do
+    kantainer_module_packages+=("/usr/share/selinux/packages/${module}.pp")
+done
+semodule --noreload --install "${kantainer_module_packages[@]}"
 
 dnf5 -y remove selinux-policy-devel
 
@@ -164,6 +210,21 @@ dnf5 -y install greenboot
 systemctl enable docker.service
 systemctl enable kantainer-portainer-load.service
 systemctl enable kantainer-portainer.service
+
+# Watchtower (SPEC.md §spec:container-updates). BOTH are enabled, and the pair is
+# not the contradiction it looks like.
+#
+# The load unit really does run on every boot: it puts the carried image into
+# Docker's store so the operator can deploy Watchtower from Portainer without
+# reaching a registry.
+#
+# The service unit is enabled too, but carries
+# ConditionPathExists=/etc/kantainer/watchtower-enabled and starts only if the
+# operator asked for it. Enabling it here is what makes that file the whole of
+# the switch - on a machine, and in the installer's Ignition config, where
+# `systemctl enable` cannot run because the unit does not exist yet.
+systemctl enable kantainer-watchtower-load.service
+systemctl enable kantainer-watchtower.service
 
 # The firewall (SPEC.md §spec:container-engine). firewalld is already installed
 # and already enabled in ucore-minimal, so there is nothing to switch on - only
@@ -287,6 +348,15 @@ test -x /usr/lib/NetworkManager/dispatcher.d/90-kantainer-console-network
 test -x /usr/libexec/kantainer/console-network-snippet
 test -x /usr/libexec/kantainer/portainer-probe
 test -x /usr/libexec/kantainer/console-portainer-snippet
+test -x /usr/libexec/kantainer/watchtower-load
+test -x /usr/libexec/kantainer/watchtower-run
+test -x /usr/libexec/kantainer/watchtower-preflight
+
+# Not an executable, and checked for a harsher reason: watchtower-run always
+# passes it with --env-file, and Docker refuses to start a container whose env
+# file is missing. The image would build, and Watchtower would fail to start on
+# every machine that switched it on.
+test -f /usr/lib/kantainer/watchtower-defaults.env
 
 # curl is what makes the port statement a statement about HTTPS rather than
 # about a TCP connect (SPEC.md §spec:console-display). It comes from the base
@@ -325,7 +395,13 @@ rm -rf /var/lib/selinux /run/selinux-policy
 # would delete the real store and the image would ship with Portainer denied the
 # Docker socket - working build, broken machine, no warning anywhere. semodule's
 # own listing is the check.
-semodule --list | grep -qx kantainer_portainer
+#
+# Every module built above is asserted, not just Portainer's: a missing
+# kantainer_socket_client is a Watchtower that cannot reach the socket, which
+# looks to the operator exactly like the denial this whole module exists to fix.
+for module in "${KANTAINER_SELINUX_MODULES[@]}"; do
+    semodule --list | grep -qx "${module}"
+done
 
 ### 5. Container signing policy (SPEC.md §spec:image-publication, §spec:os-updates)
 #
