@@ -1,0 +1,36 @@
+[Unit]
+Description=Show this machine's tailnet address on the login screen
+Documentation=https://github.com/point-source/kantainer
+
+# Same gate as kantainer-tailscale.service. A machine that never asked for
+# Tailscale writes no snippet and shows the screen it showed before this feature
+# existed.
+ConditionPathExists=/etc/kantainer/tailscale-enabled
+
+# Deliberately NOT Requires=kantainer-tailscale.service. This block's job is to
+# report on a tailnet the machine may not have reached, and a renderer ordered
+# behind a Requires would not run at all on the machine whose screen an operator
+# is most likely to be reading. After= alone is enough to put the successful case
+# in the right order; kantainer-tailscale.service also restarts this unit once it
+# has actually joined, which is what fills in the address.
+After=kantainer-tailscale.service
+
+# The join unit restarts this one, and an operator debugging a tailnet will
+# restart it by hand more than five times in ten seconds without thinking about
+# it. The sixth would be refused, parking this unit in "failed" with the screen
+# frozen at whatever the last successful run wrote - and nothing would surface
+# that, because greenboot's default checks are deliberately not installed. Rate
+# limiting the one thing that keeps the display honest protects nothing; the work
+# is one `tailscale ip` and an atomic write. Matches the other two console units.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+
+# No RemainAfterExit=yes, matching this repository's other console renderers.
+# This is re-run whenever the tailnet state changes, and a unit left
+# "active (exited)" would report the wrong thing about work that repeats.
+ExecStart=/usr/libexec/kantainer/console-tailscale-snippet
+
+[Install]
+WantedBy=multi-user.target

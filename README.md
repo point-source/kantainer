@@ -18,6 +18,9 @@ and [SPEC.md](SPEC.md) for how it works.
 - [Keep your containers updated](docs/watchtower.md) — what Watchtower does when it is on, what
   it never touches, the two ways to switch it on, and the one line that matters if you run it
   from Portainer yourself.
+- [Reach the machine from anywhere](docs/tailscale.md) — joining your Tailscale network from the
+  configuration file, what an auth key costs you when it expires, advertising routes and an exit
+  node, and what you give up by putting Portainer on the tailnet alone.
 
 ## Working on this repository
 

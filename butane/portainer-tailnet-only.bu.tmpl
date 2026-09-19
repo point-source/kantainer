@@ -1,0 +1,39 @@
+    # PORTAINER ON THE TAILNET ONLY (SPEC.md §spec:tailscale,
+    # §spec:portainer-service).
+    #
+    # Appended by render-ignition.sh when the operator set
+    # KANTAINER_PORTAINER_TAILNET_ONLY=true. Existence is the whole of the
+    # switch; nothing reads the contents.
+    #
+    # WHAT READS IT AND WHY IT IS NOT THE FIREWALL. portainer-run reads this path
+    # and publishes Portainer's port on the tailnet address instead of on every
+    # address the machine has. It has to be done there, at the point the port is
+    # published, because a published container port is DNAT'd and forwarded
+    # rather than delivered to INPUT - so it never meets a firewalld rule at all.
+    # The zone in /usr/lib/firewalld/zones/kantainer.xml says as much about its
+    # own 9443 entry. A firewall-shaped answer here would look like a control and
+    # be none.
+    #
+    # THE COST, STATED WHERE THE SWITCH IS THROWN. Binding to the tailnet address
+    # means Portainer cannot start until there is one. A machine whose Tailscale
+    # is broken has a Portainer that will not start, and the way back in is SSH
+    # or the machine's own keyboard - which is why kantainer.conf.example asks
+    # the operator to set a console password alongside this.
+    #
+    # The containers the operator deployed are untouched either way. This is
+    # Portainer's own port, not theirs.
+    - path: /etc/kantainer/portainer-tailnet-only
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          # This file existing is what binds Portainer to this machine's
+          # tailnet address alone, instead of to every address it has. Nothing
+          # reads what is written here. To put Portainer back on your own
+          # network as well:
+          #
+          #     sudo rm /etc/kantainer/portainer-tailnet-only
+          #     sudo systemctl restart kantainer-portainer

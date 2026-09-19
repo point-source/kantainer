@@ -4,10 +4,80 @@
 # A script rather than a bare ExecStart= so the reference comes from the file the
 # build wrote, and so the reasoning behind each flag sits where the next reader
 # will look for it.
+#
+# Usage: portainer-run [image-reference-file] [tailnet-only-gate]
+#
+# Both default to the paths the build and the installer write, which is how the
+# unit calls it. They are spelled out so the tailnet-only refusal can be run
+# against a stubbed Tailscale in scripts/test-tailscale.sh - that refusal is the
+# one place this script can put the administration interface somewhere the
+# operator did not ask for, so a check that is never run is not good enough.
+#
+# `docker` and `tailscale` are resolved from PATH for the same reason, as
+# watchtower-preflight already does with `docker`. systemd gives a service a
+# fixed PATH, so a machine finds /usr/bin/docker either way.
 
 set -oue pipefail
 
-read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
+IMAGE_FILE="${1:-/usr/lib/kantainer/portainer-image}"
+TAILNET_ONLY_GATE="${2:-/etc/kantainer/portainer-tailnet-only}"
+
+read -r IMAGE_REF < "${IMAGE_FILE}"
+
+# WHERE PORTAINER'S PORT IS PUBLISHED (SPEC.md §spec:tailscale).
+#
+# By default, on every address this machine has - which is what makes Portainer
+# reachable from the operator's own network, and also over a tailnet once the
+# machine has joined one.
+#
+# With /etc/kantainer/portainer-tailnet-only present, on the tailnet address
+# alone. THIS IS THE ONLY PLACE THAT DECISION CAN BE MADE. A published container
+# port is DNAT'd and forwarded rather than delivered to INPUT, so it never meets
+# a firewalld rule - the zone file in /usr/lib/firewalld/zones/kantainer.xml says
+# so about its own 9443 entry. Narrowing the firewall here would look like a
+# control and be none; binding the listener is the control.
+#
+# FAILING IS THE CORRECT OUTCOME WHEN THERE IS NO ADDRESS. The alternative -
+# falling back to publishing on every interface - would answer a request for "on
+# the tailnet only" by putting the administration interface on the operator's
+# whole network, at the exact moment they cannot see the machine to notice. The
+# unit lands in "failed" with the message below, the login screen's Tailscale
+# block says the machine is not connected (§spec:console-display), and the
+# containers the operator deployed go on running untouched: this is Portainer's
+# own port, not theirs.
+PUBLISH_ARGS=(--publish 9443:9443)
+
+if [[ -e "${TAILNET_ONLY_GATE}" ]]; then
+    # `tailscale ip -4` exits non-zero when the machine has no address yet.
+    if ! TAILNET_IP="$(tailscale ip -4 2> /dev/null)" || [[ -z "${TAILNET_IP}" ]]; then
+        cat >&2 <<MSG
+portainer-run: Portainer is configured for the tailnet only, and this machine
+has no tailnet address.
+
+  Gate file: ${TAILNET_ONLY_GATE}
+
+Portainer is NOT being started on every address instead: that would publish the
+administration interface to your whole network at the moment you cannot see this
+machine to notice.
+
+Fix Tailscale first:
+
+    systemctl status kantainer-tailscale
+    tailscale status
+
+or put Portainer back on this machine's own network as well:
+
+    rm /etc/kantainer/portainer-tailnet-only
+    systemctl restart kantainer-portainer
+MSG
+        exit 1
+    fi
+
+    # One address per line; a machine has one tailnet IPv4 address.
+    TAILNET_IP="${TAILNET_IP%%$'\n'*}"
+    PUBLISH_ARGS=(--publish "${TAILNET_IP}:9443:9443")
+    echo "portainer-run: publishing on the tailnet address ${TAILNET_IP} only"
+fi
 
 # --admin-password-file  reads the plain password and creates the administrator
 #     BEFORE the web server accepts its first connection. That is what removes
@@ -29,9 +99,10 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 #     /data thereafter. Note this setting is recorded in Portainer's database
 #     and persists: removing the flag later will not bring 9000 back.
 #
-# Only 9443 is published. Portainer's agent tunnel always binds inside the
-# container and has no disable flag, so not publishing it is what closes it -
-# the firewall does not filter published container ports.
+# Only 9443 is published, and PUBLISH_ARGS above decides on which addresses.
+# Portainer's agent tunnel always binds inside the container and has no disable
+# flag, so not publishing it is what closes it - the firewall does not filter
+# published container ports.
 #
 # No --restart flag: systemd owns this container's lifecycle. Two supervisors
 # over one container is a fight nobody wins. Containers the operator deploys
@@ -60,9 +131,9 @@ read -r IMAGE_REF < /usr/lib/kantainer/portainer-image
 # would quietly fetch it from Docker Hub by tag, unsigned, bypassing the digest
 # pin entirely. The load unit cannot catch that: it is a oneshot and stays
 # active once it has run this boot. Failing here instead is the honest outcome.
-exec /usr/bin/docker run --rm --name kantainer-portainer \
+exec docker run --rm --name kantainer-portainer \
     --pull=never \
-    --publish 9443:9443 \
+    "${PUBLISH_ARGS[@]}" \
     --security-opt label=type:kantainer_portainer_t \
     --label com.centurylinklabs.watchtower.enable=false \
     --volume /run/docker.sock:/var/run/docker.sock \

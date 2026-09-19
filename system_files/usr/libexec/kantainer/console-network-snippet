@@ -47,6 +47,18 @@ set -oue pipefail
 
 PORTAINER_PORT=9443
 
+# Existence means Portainer's port is published on this machine's tailnet
+# address alone (SPEC.md §spec:tailscale), so none of the addresses below reach
+# it. The block still prints them - they are how the operator finds the machine,
+# and SSH is still there - but it must not go on saying Portainer is at an
+# address where nothing is listening.
+#
+# THIS IS AN HONESTY FIX, NOT A COSMETIC ONE. A screen that offers a URL which
+# refuses every connection sends the operator to debug Portainer, which is
+# working, instead of Tailscale, which is not. That is the same failure
+# §req:sc:screen-says-no-address exists to forbid, one step further along.
+TAILNET_ONLY=/etc/kantainer/portainer-tailnet-only
+
 # 90_ so the block lands below EVERY snippet the base image writes: the
 # platform's 21_clhm_ssh_host_keys and 22_clhm_<ifname>, and Fedora CoreOS's own
 # 30_coreos_ignition_* and 30_ssh_authorized_keys. agetty version-sorts the
@@ -136,10 +148,18 @@ kantainer_device_lines() {
         network="wired"
     fi
 
+    # kantainer_browser_url stays the filter in both branches - loopback, IPv6
+    # link-local and the empty case are not addresses anybody can use, whichever
+    # line is being written - even though only one branch prints its result.
     local address url
     for address in "$@"; do
         url="$(kantainer_browser_url "${address}")" || continue
-        printf 'Portainer at %s (%s)\n' "${url}" "${network}"
+        if [[ -e "${TAILNET_ONLY}" ]]; then
+            printf 'Machine at %s (%s) - Portainer is on the tailnet only\n' \
+                "${address%%/*}" "${network}"
+        else
+            printf 'Portainer at %s (%s)\n' "${url}" "${network}"
+        fi
     done
 }
 
@@ -196,7 +216,14 @@ kantainer_network_block() {
     # with the cable out, and on any boot before DHCP has answered - both times
     # when an operator is most likely to be standing in front of it.
     if [[ "${#lines[@]}" -eq 0 ]]; then
-        echo 'Portainer: no network address yet - nothing to type into a browser.'
+        if [[ -e "${TAILNET_ONLY}" ]]; then
+            # Naming Portainer here would be wrong twice over on this machine:
+            # it is not on any of these addresses, and the block directly below
+            # this one is already reporting the tailnet it IS on.
+            echo 'This machine has no network address yet.'
+        else
+            echo 'Portainer: no network address yet - nothing to type into a browser.'
+        fi
         return 0
     fi
 

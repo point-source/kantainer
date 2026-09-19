@@ -230,8 +230,9 @@ The repository carries a configuration template. The operator copies it, fills i
 keeps their copy out of version control. It is the only place machine-specific values
 exist. `kantainer.conf.example` is the authoritative list of what it carries: a login
 account, an SSH public key and the Portainer administrator password are required; a target
-drive, a wireless network name and passphrase, a console password and whether the machine
-runs Watchtower (§spec:container-updates) are optional.
+drive, a wireless network name and passphrase, a console password, whether the machine
+runs Watchtower (§spec:container-updates) and the Tailscale network it joins
+(§spec:tailscale) are optional.
 
 The file is parsed rather than executed, and each value is taken literally to the end of its
 line. The operator is not asked to learn shell quoting for a password.
@@ -432,6 +433,11 @@ restarts if it stops or if the machine reboots.
 It serves its web interface over HTTPS, with a certificate the machine generates for itself
 on first run and reuses thereafter. Browsers warn about that certificate; the warning is
 expected and the documentation says so.
+
+By default the interface answers on every address the machine has, which includes its tailnet
+address once it has joined one. An operator may instead publish it on the tailnet address
+alone, and then it answers nowhere else — see §spec:tailscale, which also records what that
+costs when the tailnet is down.
 
 The administrator account exists before the interface accepts its first connection, using
 the password from the configuration file. There is no setup screen, no token to retrieve,
@@ -639,6 +645,11 @@ Remote access exists for the rare occasion something needs looking at. Nothing i
 operation — installing, reaching Portainer, deploying containers, updating, recovering from
 a bad update — requires it.
 
+A machine on a tailnet (§spec:tailscale) is reached the same way and by the same key. The
+tailnet changes which addresses the machine answers on, not how it authenticates: Tailscale's
+own SSH server is deliberately not enabled, so this section stays a statement about the
+machine rather than about one of two ways in.
+
 **Decision and constraint.** §req:quality-attributes requires key-only access and
 §req:sc:ssh-by-key-only requires password logins to be refused. Refusing passwords
 outright, rather than merely not setting one, means a later change that sets a password
@@ -661,6 +672,145 @@ physical access and a reinstall as the only recovery. For a machine whose entire
 configuration lives in a file the operator already keeps, reinstalling is cheap.
 
 Cites §req:sc:ssh-by-key-only, §req:quality-attributes, §req:constraints.
+
+## Private network §spec:tailscale
+
+*Status: complete* — not yet confirmed on real hardware: joining needs a tailnet, a key and a
+boot, and the build environment has none of them. Everything below that can be decided from
+files is decided by `scripts/test-tailscale.sh`.
+
+The machine can join the operator's private Tailscale network, and does not unless they ask.
+
+Tailscale is already in the base image. uCore installs it and leaves it switched off, so this
+repository adds no package, pins no version and downloads nothing: the version a machine runs
+is the one the base image digest already pins. What it adds is the configuration — the machine
+joins a tailnet on first boot, with no keyboard input, from a key in the operator's
+configuration file.
+
+The authentication key is the switch. A configuration that carries one produces a machine that
+joins; a configuration that does not produces a machine where no VPN daemon runs at all — not
+started and idle, but not started. Every other Tailscale field describes a machine that has
+joined, so setting one without a key is refused rather than accepted and ignored.
+
+Once joined, the machine is reachable at its tailnet address from any device on that tailnet,
+for SSH and for Portainer, without a port opened on the operator's router. The login screen
+carries that address alongside the machine's own (§spec:console-display), because otherwise
+the only place to find it is Tailscale's admin console.
+
+The key is used once. It is handed to Tailscale as a path, never as an argument, so it does not
+reach a command line, a process list or the journal; and the gate that starts Tailscale is a
+separate file, so an operator who deletes a spent key does not take the machine off its tailnet
+at the next reboot. Joining is attempted only when the machine is actually logged out. A
+machine that has joined is left alone, including its settings — which is what lets an operator
+change something by hand without the next boot undoing it.
+
+The machine can offer to carry traffic for the tailnet: as an exit node, or by advertising
+routes to networks it can reach. Both are offers. Nothing routes through the machine until it
+is approved in Tailscale's own admin console, and both the configuration template and
+`just config-check` say so at the moment the operator writes the field. A machine configured
+for either also gets the kernel side of it — IP forwarding, for v4 and v6 — because without
+that the route is approved, looks correct everywhere, and drops every packet.
+
+Portainer can be published on the tailnet address alone. That is a binding, not a firewall
+rule: a published container port is forwarded rather than delivered to the host's input chain,
+so no zone can narrow it (§spec:container-engine already says this about its own 9443 entry).
+When it is asked for and there is no tailnet address, Portainer does not start. It does not
+fall back to publishing on every interface.
+
+Tailscale SSH is off. The machine is reached over the tailnet through its own sshd, with the
+key from the configuration file (§spec:remote-access).
+
+**Decision and constraint.** §req:quality-attributes scopes this to a home network, and
+§spec:network-attachment leaves the machine on whatever address its router hands out. That is
+enough to reach Portainer from the sofa and nothing at all from anywhere else. The alternatives
+an operator would otherwise reach for — forwarding a port, or exposing the administration
+interface of a root-equivalent service to the internet — are worse than the problem.
+
+Tailscale rather than raw WireGuard, which is also in the base image: WireGuard would need a
+key exchange, a fixed endpoint and a port on the router, which is the problem again wearing a
+hat. Tailscale's coordination removes all three, at the cost of depending on a third party for
+coordination.
+
+It is off by default for the reason §spec:container-updates is: it changes what the machine is
+attached to, and an operator should say so rather than find out. A machine with no key in its
+configuration is byte-for-byte the machine this repository built before this field existed.
+
+The version is deliberately not pinned in `versions.env`. uCore installs the package, so
+`UCORE_DIGEST` is already the pin, and a second version written here could disagree with what
+the base image actually carries with nothing reporting the disagreement. The exposure that
+leaves is uCore dropping the package — which would produce a build that succeeds, a `just ci`
+that passes, and a machine that accepts a key and then fails at first boot on a unit nobody is
+watching. `build_files/build.sh` asserts the binaries exist, where it is decidable.
+
+MagicDNS is accepted, which is not the obvious choice on a machine running Docker: tailscaled
+taking over `/etc/resolv.conf` behind NetworkManager's back would break name resolution for
+every container. It is safe here specifically because the base image has systemd-resolved
+enabled, so tailscaled hands DNS to resolved instead. That was verified against the pinned base
+image rather than assumed, and it is the kind of fact that a base image bump can quietly
+reverse.
+
+**Alternatives rejected.** Running Tailscale as a container, the way Portainer and Watchtower
+are carried, was rejected. It would have been the consistent-looking choice and it is the wrong
+one for a host VPN: `tailscale` would only exist inside the container, so the console renderer
+and any operator at the keyboard would reach it through `docker exec`; the daemon's view of
+`/etc/resolv.conf` would be the container's, so MagicDNS would not reach the host; and it would
+need the Docker socket's neighbours — host networking, `NET_ADMIN`, `/dev/net/tun` — to end up
+somewhere a package already is.
+
+Layering the Tailscale RPM ourselves, from Tailscale's repository, was rejected as installing a
+second copy of a package the base image already installs from the same place.
+
+Enabling `tailscaled` in the image and letting the gate control only the login was rejected: it
+would leave a daemon holding a key to a private network running on every machine, including
+every machine that never asked for one.
+
+Tailscale SSH was rejected as a default and as an option. It authenticates against the tailnet's
+ACLs rather than against the key in the operator's configuration file, so it is a second front
+door with a different lock on it — and §spec:remote-access is written to make "password logins
+are refused" a statement about the machine rather than about sshd.
+
+Narrowing the firewall zone instead of binding Portainer's port was rejected as a control that
+is not one: the zone never sees the traffic.
+
+Falling back to publishing Portainer on every interface when the tailnet is down was rejected
+outright. It answers a request for "reachable over the tailnet only" by putting the
+administration interface on the operator's whole network, at the one moment they cannot see the
+machine to notice.
+
+Varying the firewall zone with the operator's configuration was rejected because firewalld has
+no drop-in mechanism for zones: varying it means the installer writing
+`/etc/firewalld/zones/kantainer.xml`, which shadows the image's copy by name and freezes that
+machine's firewall at whatever shipped the day it was flashed. 41641/udp is open on every
+machine instead, where nothing listens on it unless Tailscale is running.
+
+**Tradeoffs.** The machine now depends on a third party to reach it from outside the house.
+Tailscale's coordination server being unavailable does not stop an existing connection, but it
+does stop a new machine joining — and an expired key stops a reflash, which is why the
+configuration template says so twice.
+
+An authentication key sits in a plain file on the operator's machine, on the USB stick and on
+the machine's own disk, and it is a credential to the operator's whole private network rather
+than to this machine. Single-use keys, which are Tailscale's default, reduce that to a window
+rather than a standing risk; the template says to prefer them and says the file is safe to
+delete afterwards.
+
+Choosing to publish Portainer on the tailnet alone means a broken tailnet is a Portainer that
+will not start. The containers the operator deployed are untouched — this is Portainer's own
+port — but getting the interface back means SSH or the machine's own keyboard, which is why
+`kantainer.conf.example` asks for a console password alongside it (§spec:console-password).
+
+Advertising routes or an exit node turns this machine into a piece of the operator's network
+rather than a host on it. Nothing here limits what a tailnet device can then reach through it;
+that boundary is Tailscale's ACLs, in Tailscale's admin console, and this repository is not in
+a position to state it for them.
+
+Opt-in has the quiet failure §spec:container-updates also has: a machine flashed without a key
+is simply never on the tailnet, and nothing reports it. `just config-check` says which machine
+the operator is about to build, which is the moment that is decidable.
+
+Cites §req:sc:tailscale-joins-unattended, §req:sc:tailscale-documented,
+§req:sc:portainer-in-a-browser, §req:sc:ssh-by-key-only, §req:quality-attributes,
+§req:constraints.
 
 ## Console display §spec:console-display
 
@@ -704,6 +854,14 @@ it, and whether an HTTPS connection to its port was actually answered, together 
 was last checked. On a healthy machine the two agree. When they disagree, the screen shows the
 disagreement rather than choosing one. Until the port has been checked at all, the second
 statement says so rather than reporting a refusal.
+
+A machine on a tailnet (§spec:tailscale) carries a third statement, below the other two: its
+tailnet address, written the same way, or that it has not connected yet. A machine that never
+joined a tailnet carries no such line at all — the absence is the report. Where Portainer is
+published on the tailnet alone, the address lines above stop offering a URL that would refuse
+every connection, and say where Portainer actually is instead: a screen that sends the operator
+to debug Portainer, which is working, rather than Tailscale, which is not, is the same failure
+as a stale address one step further along.
 
 The block is current rather than a snapshot of boot. Attaching a cable, joining a network, a
 new address arriving from the router, and Portainer starting, stopping or failing are all

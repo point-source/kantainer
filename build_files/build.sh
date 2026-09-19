@@ -226,6 +226,26 @@ systemctl enable kantainer-portainer.service
 systemctl enable kantainer-watchtower-load.service
 systemctl enable kantainer-watchtower.service
 
+# Tailscale (SPEC.md §spec:tailscale).
+#
+# tailscaled.service IS DELIBERATELY NOT ENABLED. ucore-minimal installs the
+# tailscale package and leaves its unit disabled, and that is the right state for
+# a machine that never asked for a VPN: it runs no daemon holding a key to a
+# private network. kantainer-tailscale.service carries Requires=tailscaled.service
+# and systemd starts a required unit whether or not it is enabled, so the gate
+# file is the whole of the switch - exactly as it is for Watchtower.
+#
+# Enabling it here would break that: the daemon would come up on every machine,
+# and the gate would control only whether something logged in.
+systemctl enable kantainer-tailscale.service
+
+# The login screen's tailnet line (SPEC.md §spec:console-display). Gated on the
+# same file, so a machine without Tailscale writes no snippet at all. Enabled
+# rather than left to kantainer-tailscale.service's ExecStartPost alone, because
+# on every boot after the first the join is already done and that hook would be
+# the only thing that ever ran it.
+systemctl enable kantainer-console-tailscale.service
+
 # The firewall (SPEC.md §spec:container-engine). firewalld is already installed
 # and already enabled in ucore-minimal, so there is nothing to switch on - only
 # to narrow. The zone itself ships in system_files as an image-owned file; all
@@ -351,6 +371,33 @@ test -x /usr/libexec/kantainer/console-portainer-snippet
 test -x /usr/libexec/kantainer/watchtower-load
 test -x /usr/libexec/kantainer/watchtower-run
 test -x /usr/libexec/kantainer/watchtower-preflight
+test -x /usr/libexec/kantainer/tailscale-up
+test -x /usr/libexec/kantainer/console-tailscale-snippet
+
+# TAILSCALE COMES FROM THE BASE IMAGE, AND THAT IS WHY THESE LINES EXIST
+# (SPEC.md §spec:tailscale).
+#
+# ucore-minimal installs the tailscale package from Tailscale's own repository;
+# this repository adds no package and pins no version, because the base image
+# digest in the Containerfile already pins one. That is the cheapest possible
+# arrangement and it has exactly one failure mode: uCore drops the package, or
+# moves it to a variant this image is not built from.
+#
+# Nothing else would notice. The build would succeed, `just ci` would pass - it
+# never opens the image - and the machine would install, accept an authentication
+# key from the operator's configuration, write it to disk, and then fail at first
+# boot on a unit nobody is watching. Assert it here, where it is decidable.
+test -x /usr/bin/tailscale
+test -x /usr/sbin/tailscaled
+test -f /usr/lib/systemd/system/tailscaled.service
+
+# tailscale-up reads BackendState out of `tailscale status --json` with jq. It
+# fails closed without it - an unreadable state is refused rather than guessed -
+# so a missing jq would not produce a wrong machine, just a machine that never
+# joins and blames tailscaled for it in the journal. Asserted here because that
+# is a confusing hour spent on a fault that is decidable at build time. jq comes
+# from the base image, like curl below.
+test -x /usr/bin/jq
 
 # Not an executable, and checked for a harsher reason: watchtower-run always
 # passes it with --env-file, and Docker refuses to start a container whose env

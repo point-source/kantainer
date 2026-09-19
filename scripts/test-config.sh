@@ -55,6 +55,11 @@ config() {
         [KANTAINER_WIFI_SSID]=""
         [KANTAINER_WIFI_PASSPHRASE]=""
         [KANTAINER_WATCHTOWER_ENABLED]=""
+        [KANTAINER_TAILSCALE_AUTHKEY]=""
+        [KANTAINER_TAILSCALE_HOSTNAME]=""
+        [KANTAINER_TAILSCALE_EXIT_NODE]=""
+        [KANTAINER_TAILSCALE_ROUTES]=""
+        [KANTAINER_PORTAINER_TAILNET_ONLY]=""
     )
 
     local override key
@@ -316,6 +321,157 @@ advises "names the label when Watchtower is switched on" \
 advises "says Watchtower is carried but not running when it is off" \
     "Watchtower will not run" \
     "KANTAINER_WATCHTOWER_ENABLED="
+
+### The Tailscale fields (§spec:tailscale)
+
+TEST_AUTHKEY=tskey-auth-fixture0CNTRL-thiskeyauthenticatesnothing
+
+accepts "accepts a machine that joins a tailnet" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}"
+
+accepts "accepts a machine that names itself on the tailnet" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" \
+    "KANTAINER_TAILSCALE_HOSTNAME=garage-box"
+
+accepts "accepts a machine that routes for the tailnet" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" \
+    "KANTAINER_TAILSCALE_EXIT_NODE=true" \
+    "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,fd00::/64"
+
+accepts "accepts a machine with no Tailscale at all" \
+    "KANTAINER_TAILSCALE_AUTHKEY="
+
+# THE KEY IS THE SWITCH, so every other field without one describes a machine
+# that never joins anything. Written down and never used is the failure this
+# repository refuses everywhere else it appears, and each field is refused BY
+# NAME so the operator is told which line to go and fix.
+refuses "refuses a node name on a machine that never joins" \
+    "KANTAINER_TAILSCALE_HOSTNAME" "KANTAINER_TAILSCALE_HOSTNAME=garage-box"
+
+refuses "refuses an exit node on a machine that never joins" \
+    "KANTAINER_TAILSCALE_EXIT_NODE" "KANTAINER_TAILSCALE_EXIT_NODE=true"
+
+refuses "refuses routes on a machine that never joins" \
+    "KANTAINER_TAILSCALE_ROUTES" "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24"
+
+# The worst of the four to accept quietly: it would render a machine whose
+# Portainer binds to a tailnet address that never exists, so it would serve
+# nothing at all.
+refuses "refuses a tailnet-only Portainer on a machine that never joins" \
+    "KANTAINER_PORTAINER_TAILNET_ONLY" "KANTAINER_PORTAINER_TAILNET_ONLY=true"
+
+# An API access token and an auth key look alike and are issued from pages that
+# look alike. Only one can bring a machine onto a tailnet; the other fails at
+# first boot with "invalid key", which reads like a typo.
+refuses "refuses an API token pasted where an auth key belongs" \
+    "API access token" "KANTAINER_TAILSCALE_AUTHKEY=tskey-api-fixture0CNTRL-notanauthkey"
+
+refuses "refuses something that is not a Tailscale key at all" \
+    "KANTAINER_TAILSCALE_AUTHKEY" "KANTAINER_TAILSCALE_AUTHKEY=hunter2hunter2"
+
+# Whitespace is what a key picks up on its way through a terminal or a chat
+# window, and tailscaled would refuse it hours later on a headless machine.
+refuses "refuses a key with a space in it" \
+    "KANTAINER_TAILSCALE_AUTHKEY" "KANTAINER_TAILSCALE_AUTHKEY=tskey-auth-fix ture"
+
+# Tailscale lowercases and trims whatever it is given, so any other shape would
+# appear in the operator's tailnet as a name they did not write.
+refuses "refuses a node name Tailscale would silently rewrite" \
+    "KANTAINER_TAILSCALE_HOSTNAME" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_HOSTNAME=Garage_Box"
+
+refuses "refuses a node name that starts with a dash" \
+    "KANTAINER_TAILSCALE_HOSTNAME" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_HOSTNAME=-box"
+
+# Same reasoning as the Watchtower switch: the renderer tests for `true` and
+# nothing else, so anything the validator lets past and does not recognise is a
+# machine that silently does not do the thing.
+refuses "refuses a yes where the exit node wants true" \
+    "KANTAINER_TAILSCALE_EXIT_NODE" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_EXIT_NODE=yes"
+
+refuses "refuses a yes where the tailnet-only switch wants true" \
+    "KANTAINER_PORTAINER_TAILNET_ONLY" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_PORTAINER_TAILNET_ONLY=yes"
+
+# A route is a block, not an address. `tailscale up` would refuse a bare address
+# too, on the machine, with nobody watching.
+refuses "refuses a single address where a route block belongs" \
+    "not a network block" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=192.168.1.5"
+
+refuses "refuses a prefix length out of range" \
+    "not a network block" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/33"
+
+refuses "refuses an octet out of range" \
+    "not a network block" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=256.1.1.0/24"
+
+# Different parsers disagree about whether a leading zero means octal, so the
+# address an operator meant is not the address every reader would see.
+refuses "refuses an octet with a leading zero" \
+    "not a network block" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=010.0.0.0/8"
+
+refuses "refuses a space after the comma separating two routes" \
+    "not a network block" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" \
+    "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24, 10.0.0.0/8"
+
+# The one the obvious loop walks straight past: consuming routes until nothing
+# is left never examines the field AFTER a final comma.
+refuses "refuses a trailing comma" \
+    "empty entry" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,"
+
+refuses "refuses a leading comma" \
+    "empty entry" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=,10.0.0.0/8"
+
+# What the operator gets read back to them. The key itself is never echoed: this
+# line ends up in terminals, scrollbacks and pastes, and a key that reaches one
+# of those is a key to regenerate.
+advises "names the machine as the tailnet will show it" \
+    "as 'garage-box'" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_HOSTNAME=garage-box"
+
+advises "falls back to kantainer when no node name was given" \
+    "as 'kantainer'" "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}"
+
+# The commonest surprise with both routing settings: the field is set, the
+# machine advertises, and nothing routes, because the other half of the switch
+# lives in Tailscale's admin console.
+advises "says an exit node still needs approving" \
+    "Approve it in the admin console" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_EXIT_NODE=true"
+
+advises "says routes still need approving" \
+    "Approve them in the admin console" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24"
+
+advises "says what a tailnet-only Portainer costs" \
+    "Portainer does not start" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_PORTAINER_TAILNET_ONLY=true"
+
+# An auth key expires on the key rather than on the machine, so a stick flashed
+# today installs a machine next year with a key that joins nothing.
+advises "warns that the key expires" \
+    "expires" "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}"
+
+advises "says Tailscale is in the image when it is off" \
+    "Tailscale will not run" "KANTAINER_TAILSCALE_AUTHKEY="
+
+# The key must not be read back. Checked as the absence of the secret rather
+# than the presence of a phrase, because this is the assertion that catches a
+# well-meaning change to the reporting line.
+config "${WORK}/conf" "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}"
+if "${CHECK}" "${WORK}/conf" 2>&1 | grep -qF "${TEST_AUTHKEY}"; then
+    not_ok "the configuration check never echoes the authentication key"
+else
+    ok "the configuration check never echoes the authentication key"
+fi
 
 ### render-ignition.sh
 
@@ -772,6 +928,138 @@ else
     not_ok "switching Watchtower on changes more than the gate file:
 ${difference}"
 fi
+
+### the Tailscale files (§spec:tailscale)
+#
+# Same reasoning as the Watchtower gate above, and more of it: Tailscale renders
+# FIVE files across three fragments, each appended under its own condition. A
+# regression in any one append would leave scripts/test-tailscale.sh passing on
+# source that still reads correctly, while every machine flashed from this
+# repository either joined a tailnet it was not asked to join or refused to join
+# the one it was.
+TS_GATE=/etc/kantainer/tailscale-enabled
+TS_KEY=/etc/kantainer/tailscale-authkey
+TS_ENV=/etc/kantainer/tailscale.env
+TS_FORWARDING=/etc/sysctl.d/99-kantainer-tailscale-forwarding.conf
+TS_TAILNET_ONLY=/etc/kantainer/portainer-tailnet-only
+
+render "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}"
+
+assert_jq "a machine that asked for Tailscale carries the gate file" \
+    '[.storage.files[] | select(.path == "'"${TS_GATE}"'")] | length' "1"
+
+assert_jq "it carries the authentication key" \
+    '[.storage.files[] | select(.path == "'"${TS_KEY}"'")] | length' "1"
+
+# 0600 root:root. The key is a credential to the operator's whole private
+# network rather than to this machine, so a mode that let any account on the
+# machine read it would be a worse leak than the Portainer password.
+assert_jq "the key is readable only by root" \
+    '.storage.files[] | select(.path == "'"${TS_KEY}"'") | "\(.mode) \(.user.id):\(.group.id)"' "384 0:0"
+
+assert_jq "it carries the settings the unit reads" \
+    '[.storage.files[] | select(.path == "'"${TS_ENV}"'")] | length' "1"
+
+# The key reaches the machine EXACTLY as the operator wrote it, with no trailing
+# newline: `tailscale up --auth-key=file:` is handed this file, and the file is
+# the key and nothing else.
+if [[ "$(file_at "${TS_KEY}")" == "${TEST_AUTHKEY}" ]]; then
+    ok "the key is rendered exactly, with nothing around it"
+else
+    not_ok "the key is rendered exactly, with nothing around it (got: $(file_at "${TS_KEY}"))"
+fi
+
+# Every setting is written even at its default, so an operator reading the file
+# on the machine can tell a default from a setting nobody thought about - and
+# the empty string is what --advertise-routes wants for "advertise nothing".
+settings="$(file_at "${TS_ENV}")"
+for want in "KANTAINER_TAILSCALE_HOSTNAME=kantainer" \
+    "KANTAINER_TAILSCALE_EXIT_NODE=false" \
+    "KANTAINER_TAILSCALE_ROUTES="; do
+    if [[ "${settings}" == *"${want}"* ]]; then
+        ok "the settings file states ${want%%=*}"
+    else
+        not_ok "the settings file states ${want%%=*} (wanted ${want}, got: ${settings})"
+    fi
+done
+
+# A machine that joins for its own sake forwards nothing. Turning on forwarding
+# widens what a machine does with packets not addressed to it, which is not a
+# side effect to hand somebody who asked for a VPN.
+assert_jq "a machine that only joins does not turn on forwarding" \
+    '[.storage.files[] | select(.path == "'"${TS_FORWARDING}"'")] | length' "0"
+
+assert_jq "a machine that only joins keeps Portainer on every address" \
+    '[.storage.files[] | select(.path == "'"${TS_TAILNET_ONLY}"'")] | length' "0"
+
+cp "${WORK}/out.json" "${WORK}/tailscale-on.json"
+
+# WITHOUT THE KEY, NO TRACE OF ANY OF IT - exactly as a wired machine carries no
+# wireless profile.
+render "KANTAINER_TAILSCALE_AUTHKEY="
+
+for absent in "${TS_GATE}" "${TS_KEY}" "${TS_ENV}" "${TS_FORWARDING}" "${TS_TAILNET_ONLY}"; do
+    assert_jq "a machine without a key carries no ${absent##*/}" \
+        '[.storage.files[] | select(.path == "'"${absent}"'")] | length' "0"
+done
+
+cp "${WORK}/out.json" "${WORK}/tailscale-off.json"
+
+# Switching Tailscale on adds those three files and NOTHING ELSE. Compared whole
+# rather than path by path, so a fragment that also moved a unit, a mode or an
+# owner is caught here rather than on a machine.
+difference="$(jq -S '.storage.files[].path' "${WORK}/tailscale-on.json" |
+    diff - <(jq -S '.storage.files[].path' "${WORK}/tailscale-off.json") || true)"
+added="$(grep -c '^<' <<< "${difference}" || true)"
+if [[ "${added}" -eq 3 && "$(grep -c '^>' <<< "${difference}" || true)" -eq 0 ]]; then
+    ok "joining a tailnet adds the gate, the key and the settings, and nothing else"
+else
+    not_ok "joining a tailnet changes more than its three files:
+${difference}"
+fi
+
+# Routing is the kernel's half as well as Tailscale's. Without the sysctl the
+# route is approved, looks correct everywhere, and drops every packet.
+render "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_TAILSCALE_EXIT_NODE=true"
+
+assert_jq "an exit node turns forwarding on" \
+    '[.storage.files[] | select(.path == "'"${TS_FORWARDING}"'")] | length' "1"
+
+render "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" \
+    "KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,fd00::/64"
+
+assert_jq "advertised routes turn forwarding on" \
+    '[.storage.files[] | select(.path == "'"${TS_FORWARDING}"'")] | length' "1"
+
+# Both families. An IPv6 route with only IPv4 forwarding enabled is the same
+# silent drop, and only this assertion separates the two lines.
+forwarding="$(file_at "${TS_FORWARDING}")"
+for want in "net.ipv4.ip_forward = 1" "net.ipv6.conf.all.forwarding = 1"; do
+    if [[ "${forwarding}" == *"${want}"* ]]; then
+        ok "forwarding is enabled for ${want%%.*}$( [[ "${want}" == *ipv6* ]] && echo "6" || echo "4" )"
+    else
+        not_ok "forwarding is missing: ${want}"
+    fi
+done
+
+# The routes reach the machine as `tailscale up --advertise-routes` takes them,
+# unchanged. A renderer that reordered or re-spaced them would advertise
+# something the operator did not write.
+if [[ "$(file_at "${TS_ENV}")" == *"KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,fd00::/64"* ]]; then
+    ok "the routes are passed through exactly as written"
+else
+    not_ok "the routes are passed through exactly as written (got: $(file_at "${TS_ENV}"))"
+fi
+
+render "KANTAINER_TAILSCALE_AUTHKEY=${TEST_AUTHKEY}" "KANTAINER_PORTAINER_TAILNET_ONLY=true"
+
+assert_jq "a tailnet-only Portainer carries its gate file" \
+    '[.storage.files[] | select(.path == "'"${TS_TAILNET_ONLY}"'")] | length' "1"
+
+# Asking for a tailnet-only Portainer must not quietly also make the machine a
+# router. They are separate decisions with separate costs.
+assert_jq "a tailnet-only Portainer does not turn on forwarding by itself" \
+    '[.storage.files[] | select(.path == "'"${TS_FORWARDING}"'")] | length' "0"
 
 ### refusals
 

@@ -67,6 +67,14 @@ something else. Add criteria wherever they read best — nothing depends on the 
 - §req:sc:watchtower-documented — Before switching on unattended container updates, the
   operator can read what they do, how to opt a container in, how to change the defaults, and
   that the agent holds root-equivalent access to the machine.
+- §req:sc:tailscale-joins-unattended — With an authentication key in the configuration file, the
+  machine joins the operator's private Tailscale network on first boot with no keyboard input,
+  and Portainer is reachable over that network from a device that is not on the machine's own
+  network. A machine whose configuration names no key runs no VPN daemon at all.
+- §req:sc:tailscale-documented — Before joining a machine to a tailnet, the operator can read
+  what joining does, that an authentication key expires and is spent, what advertising routes or
+  an exit node requires of them in Tailscale's own admin console, and what they lose by making
+  Portainer reachable over the tailnet alone.
 - §req:sc:macos-host-commands — On an Apple-silicon Mac running macOS 26 or newer, the operator
   can check a configuration, render it, and flash an installer through the documented commands
   while using the operating system's built-in Bash and checksum tools.

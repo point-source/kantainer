@@ -1,0 +1,167 @@
+#!/bin/bash
+# Bring this machine onto its Tailscale network (SPEC.md §spec:tailscale).
+#
+# A script rather than a bare ExecStart= for the same reason portainer-run and
+# watchtower-run are: the reasoning behind each flag sits where the next reader
+# will look for it, and the decision about whether to run at all is one with
+# enough shape to need explaining.
+#
+# WHAT THIS DOES ON A SECOND BOOT: nothing. The machine's credentials live in
+# /var/lib/tailscale and tailscaled brings the connection up by itself; the
+# authentication key is a first-join thing. So this checks whether the machine is
+# already logged in and stops there if it is.
+#
+# THAT CHECK IS LOAD-BEARING, NOT AN OPTIMISATION. `tailscale up` requires the
+# complete set of desired settings and errors if any unmentioned flag would
+# change one - verified against the pinned Tailscale, not assumed. An operator
+# who changes something by hand with `tailscale set` would therefore find this
+# unit failing on every subsequent boot, reporting a settings conflict about a
+# machine that is working perfectly. Running only when logged out means an
+# operator's later changes are theirs to keep.
+#
+# Usage: tailscale-up [auth-key-file]
+#
+# The argument defaults to the file the installer writes, which is how the unit
+# calls it. It is spelled out so the three refusals below can be exercised
+# against a stubbed Tailscale in scripts/test-tailscale.sh: everything this
+# script decides is decided from that file, the environment and tailscaled's
+# reported state, and a check that is never run is a check that has already
+# stopped working.
+#
+# `tailscale` is resolved from PATH rather than named absolutely, for the same
+# reason - and it is what watchtower-preflight already does with `docker`.
+# systemd gives a service a fixed PATH, so the binary this finds on a machine is
+# /usr/bin/tailscale either way.
+
+set -oue pipefail
+
+AUTHKEY="${1:-/etc/kantainer/tailscale-authkey}"
+
+# The defaults a machine runs on when /etc/kantainer/tailscale.env is absent,
+# which is the machine of an operator who switched Tailscale on by hand rather
+# than through their configuration file. render-ignition.sh writes all three on
+# a machine flashed with a key, so these are a second statement of the same
+# defaults - kept here because the unit's EnvironmentFile is optional, and a
+# missing variable under `set -u` would be a crash rather than a default.
+#
+# `kantainer` rather than the system hostname: nothing in this repository sets
+# one, and Fedora CoreOS leaves it `localhost` on a network that does not supply
+# one. A tailnet full of machines called localhost is the thing this default
+# exists to avoid.
+HOSTNAME_ARG="${KANTAINER_TAILSCALE_HOSTNAME:-kantainer}"
+EXIT_NODE_ARG="${KANTAINER_TAILSCALE_EXIT_NODE:-false}"
+ROUTES_ARG="${KANTAINER_TAILSCALE_ROUTES:-}"
+
+# BackendState is Tailscale's own word for this, read from its own status rather
+# than inferred from an exit code: `tailscale status` exits non-zero both when
+# the machine is logged out and when tailscaled is not answering at all, and
+# those two need different handling. NeedsLogin and NoState are the logged-out
+# ones; Running, Starting and Stopped all mean a machine that has credentials.
+# THE EMPTY CASE IS CHECKED SEPARATELY, AND IT IS THE ONE THAT MATTERS. When
+# tailscaled is not answering, `tailscale status --json` prints nothing at all -
+# and jq over empty input emits nothing and exits 0, so a single substitution
+# here would yield the empty string rather than an error. Empty would then fall
+# through the case below to its `*` arm, which reports "already logged in" and
+# exits 0: the unit would go green on a machine that never joined anything.
+state="$(tailscale status --json 2> /dev/null | jq -r '.BackendState // empty')" || state=""
+[[ -n "${state}" ]] || state="Unknown"
+
+case "${state}" in
+    NeedsLogin | NoState) ;;
+    Unknown)
+        echo "tailscale-up: cannot read tailscaled's status - is tailscaled running?" >&2
+        echo "tailscale-up:   systemctl status tailscaled" >&2
+        exit 1
+        ;;
+    *)
+        echo "tailscale-up: already logged in (state: ${state}); leaving settings alone."
+        # Not an error, and not silent either. An operator reading the journal
+        # after changing tailscale.env needs to know that the file is read at the
+        # FIRST join and that changing it later is not how settings move.
+        echo "tailscale-up: to change settings on a machine that has already joined, use \`tailscale set\`."
+        exit 0
+        ;;
+esac
+
+# The one case where the key is actually needed. Checked for explicitly because
+# `tailscale up --auth-key=file:` on a missing file does not say "no such file":
+# it falls through to an interactive login and then refuses with a paragraph
+# about mentioning all non-default flags, which sends the reader somewhere else
+# entirely. Verified against the pinned Tailscale.
+if [[ ! -f "${AUTHKEY}" ]]; then
+    cat >&2 <<MSG
+tailscale-up: this machine is logged out and there is no authentication key.
+
+  Expected: ${AUTHKEY}
+
+That file is written by the installer when kantainer.conf carries
+KANTAINER_TAILSCALE_AUTHKEY, and it is safe to delete once the machine has
+joined - which is probably what happened here, before this machine was logged
+out again.
+
+To join now, either put a fresh key in that file and restart this unit:
+
+    sudo install -m 0600 /dev/null ${AUTHKEY}
+    sudo tee ${AUTHKEY} < /dev/null   # then paste the key, with no newline
+    sudo systemctl restart kantainer-tailscale
+
+or log in interactively and follow the URL it prints:
+
+    sudo tailscale up
+MSG
+    exit 1
+fi
+
+# Forwarding is the kernel's half of routing for a tailnet, and without it every
+# packet this machine is asked to carry is dropped while nothing looks wrong
+# (butane/tailscale-forwarding.bu.tmpl explains the failure at length). A machine
+# flashed with either setting gets the sysctl; a machine where an operator added
+# the setting by hand afterwards does not, so this says so rather than letting
+# them find out from a route that is approved and does not work.
+if [[ "${EXIT_NODE_ARG}" == "true" || -n "${ROUTES_ARG}" ]]; then
+    if [[ "$(cat /proc/sys/net/ipv4/ip_forward 2> /dev/null || echo 0)" != "1" ]]; then
+        echo "tailscale-up: WARNING - this machine advertises routes but net.ipv4.ip_forward is 0." >&2
+        echo "tailscale-up: traffic sent through it will be dropped. See docs/tailscale.md." >&2
+    fi
+fi
+
+# EVERY SETTING IS MENTIONED, INCLUDING THE ONES AT THEIR DEFAULTS, because
+# `tailscale up` demands the complete set and because this command is the
+# readable statement of what a kantainer machine asks its tailnet for.
+#
+# --auth-key=file: hands over a path, not the key. The key never appears on a
+#     command line, in `ps`, or in the journal - which matters more here than
+#     usual, because this unit's output is the first place an operator looks
+#     when a join fails.
+#
+# --accept-dns=true gives the machine MagicDNS, so other tailnet devices reach it
+#     by name. Safe on this base image specifically: systemd-resolved is enabled,
+#     so tailscaled hands DNS to resolved rather than rewriting a
+#     NetworkManager-managed /etc/resolv.conf behind its back. Verified against
+#     the pinned base image, because on a system without resolved this is the
+#     flag that quietly breaks name resolution for every container on the host.
+#
+# --ssh=false keeps sshd the only way in (SPEC.md §spec:remote-access). Tailscale
+#     SSH would authenticate against the tailnet's ACLs instead of the operator's
+#     key, which is a second front door with a different lock on it. Stated
+#     rather than omitted, so that the decision is visible here and not merely
+#     implied by a default that could change.
+#
+# --advertise-exit-node and --advertise-routes only OFFER. Nothing routes through
+#     this machine until it is approved in the admin console, which is why
+#     `just config-check` says so at the moment the operator writes the field.
+#
+# --timeout is what turns a tailnet that never answers into a failed unit with a
+#     message, instead of a boot that hangs until systemd's own 90-second
+#     default kills it with nothing written down.
+echo "tailscale-up: joining as '${HOSTNAME_ARG}' (exit node: ${EXIT_NODE_ARG}, routes: ${ROUTES_ARG:-none})"
+
+exec tailscale up \
+    --auth-key="file:${AUTHKEY}" \
+    --hostname="${HOSTNAME_ARG}" \
+    --accept-dns=true \
+    --accept-routes=false \
+    --ssh=false \
+    --advertise-exit-node="${EXIT_NODE_ARG}" \
+    --advertise-routes="${ROUTES_ARG}" \
+    --timeout=60s

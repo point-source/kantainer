@@ -388,6 +388,63 @@ done
 assert "a burst of network events cannot rate-limit the block into staleness" \
     grep -qE '^StartLimitIntervalSec=0' "${UNIT}"
 
+### A machine whose Portainer is published on the tailnet alone
+#
+# (SPEC.md §spec:tailscale.) These addresses are still how the operator finds the
+# machine, and SSH still answers on them, so they stay on the screen. What must
+# not stay is the Portainer URL: on this machine nothing is listening there, and
+# a URL that refuses every connection sends the operator to debug Portainer -
+# which is working - instead of Tailscale, which is not. That is
+# §req:sc:screen-says-no-address one step further along.
+#
+# TAILNET_ONLY is the generator's own constant, pointed at a temporary path here
+# so both branches are exercised for real rather than read for their text.
+
+tailnet_only_marker="$(mktemp)"
+trap 'rm -f "${tailnet_only_marker}"' EXIT
+
+DEVICE_SHOW="GENERAL.DEVICE:ens18
+GENERAL.TYPE:ethernet
+GENERAL.STATE:100 (connected)
+GENERAL.CONNECTION:Wired connection 1
+IP4.ADDRESS[1]:192.168.1.50/24
+"
+SSIDS=()
+
+# Read by the generator this file sourced, not by anything written here, which is
+# why the linter cannot see the use. Same relationship DEVICE_SHOW has with
+# kantainer_nmcli, except that one is resolved in this file.
+# shellcheck disable=SC2034
+TAILNET_ONLY="${tailnet_only_marker}"
+
+hides "a tailnet-only machine does not offer a Portainer URL on its own network" \
+    "https://192.168.1.50:9443"
+shows "a tailnet-only machine still shows the address it is reachable at" "192.168.1.50"
+shows "a tailnet-only machine says where Portainer actually is" \
+    "Portainer is on the tailnet only"
+
+# The no-address case on the same machine. Naming Portainer here would be wrong
+# twice over: it is on none of these addresses, and the tailnet block directly
+# below is already reporting the one it is on.
+DEVICE_SHOW=""
+hides "a tailnet-only machine with no address does not name Portainer" "Portainer"
+shows "a tailnet-only machine with no address still says so" "no network address yet"
+
+# Back to an ordinary machine, so the default is proved to be unchanged by the
+# branch above rather than merely assumed.
+# shellcheck disable=SC2034
+TAILNET_ONLY="${tailnet_only_marker}.absent"
+
+DEVICE_SHOW="GENERAL.DEVICE:ens18
+GENERAL.TYPE:ethernet
+GENERAL.STATE:100 (connected)
+GENERAL.CONNECTION:Wired connection 1
+IP4.ADDRESS[1]:192.168.1.50/24
+"
+
+shows "an ordinary machine still offers the Portainer URL" "https://192.168.1.50:9443"
+hides "an ordinary machine says nothing about a tailnet" "tailnet"
+
 ### What the image ships, rather than what the renderer produces
 
 # agetty version-sorts /etc/issue.d. The base image writes 21_clhm_*, 22_clhm_*

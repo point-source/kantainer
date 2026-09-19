@@ -4,6 +4,20 @@ Documentation=https://docs.portainer.io/
 After=docker.service kantainer-portainer-load.service
 Requires=docker.service kantainer-portainer-load.service
 
+# ORDERING ONLY, AND DELIBERATELY NOT A DEPENDENCY (SPEC.md §spec:tailscale).
+#
+# On a machine where Portainer is published on the tailnet address alone,
+# portainer-run needs that address to exist - so it has to start after the join.
+# On every other machine kantainer-tailscale.service is never started at all,
+# and After= on a unit that is not in the transaction costs nothing.
+#
+# A Requires= would be wrong in both directions: it would drag tailscaled onto
+# machines that never asked for it, and on a tailnet machine it would make a
+# failed join stop Portainer even when Portainer was perfectly able to serve on
+# this machine's own network. portainer-run decides that, because it is the only
+# thing that knows which addresses were asked for.
+After=kantainer-tailscale.service
+
 # Without a limit, a machine missing its administrator password would restart
 # Portainer forever and bury the one journal line that explains why. With it the
 # unit lands in "failed", where `systemctl status` says so plainly.
