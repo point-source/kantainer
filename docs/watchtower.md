@@ -96,6 +96,7 @@ worth knowing:
 | `WATCHTOWER_MONITOR_ONLY=true` | Check and report, change nothing. A safe first week. |
 | `WATCHTOWER_LABEL_ENABLE=false` | Update **every** container instead. Read the warning below first. |
 | `WATCHTOWER_SCHEDULE=0 0 6 * * *` | Move the nightly run. Seconds come first. |
+| `WATCHTOWER_RUN_ONCE=true` | One pass, then stop. The unit goes `inactive (dead)`, not failed. |
 
 The format is stricter than it looks. `KEY=value`, with the value taken literally to the end
 of the line: **no quotes**, which become part of the value, and comments only on lines of

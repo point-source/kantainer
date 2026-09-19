@@ -36,7 +36,29 @@ ExecStartPre=/usr/libexec/kantainer/watchtower-preflight
 ExecStartPre=-/usr/bin/docker rm --force kantainer-watchtower
 ExecStart=/usr/libexec/kantainer/watchtower-run
 ExecStop=/usr/bin/docker stop kantainer-watchtower
-Restart=always
+
+# on-failure, NOT always - and the difference is an operator override that would
+# otherwise be quietly turned into something else.
+#
+# Watchtower's normal mode never exits on its own: it schedules the nightly run
+# and blocks. So the only clean exit this unit can see is one the operator asked
+# for. WATCHTOWER_RUN_ONCE=true in /etc/kantainer/watchtower.env makes Watchtower
+# do a single pass and exit 0 - verified against the pinned image - and under
+# Restart=always systemd starts it again five seconds later, forever. On a
+# machine whose pass takes longer than RestartSec that is continuous unattended
+# updating instead of the single pass that was asked for; on one where it is
+# quicker, four starts inside StartLimitIntervalSec trip the limit and the unit
+# lands in "failed" having run four passes rather than the one. Neither is what
+# the operator wrote down, and neither reports itself as a refusal.
+#
+# A crash still restarts: docker run returns the container's exit status, so a
+# Watchtower killed out from under systemd - `docker rm --force`, an OOM kill,
+# a daemon restart - exits non-zero (137 when killed) and is brought back.
+#
+# kantainer-portainer.service keeps Restart=always for the opposite reason:
+# Portainer serving is the steady state, and a Portainer that exited cleanly has
+# still stopped serving.
+Restart=on-failure
 RestartSec=5s
 
 [Install]

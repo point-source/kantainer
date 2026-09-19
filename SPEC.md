@@ -558,6 +558,13 @@ would be accepted and ignored with nothing reporting it. Docker does let a later
 override an earlier one, which is the whole mechanism, and `scripts/test-watchtower.sh`
 fails if a default reappears on the command line or the two files swap order.
 
+The unit restarts Watchtower only when it exits in failure, for the same reason. Watchtower's
+scheduled mode never exits on its own, so the only clean exit the unit can see is one the
+operator asked for by overriding it into a single pass — and restarting that would turn a
+single pass into either a continuous one or a unit in `failed`, without anything reporting
+that the setting had been overruled. A Watchtower killed out from under systemd still exits
+non-zero and is still brought back.
+
 A second SELinux domain rather than reusing Portainer's: Portainer's domain also owns
 Portainer's database, administrator hash and TLS key, and Watchtower has no business with
 any of them. The new domain owns no file type at all. It is also reusable, which is what
