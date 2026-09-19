@@ -29,12 +29,44 @@ set -oue pipefail
 IMAGE_FILE="${1:-/usr/lib/kantainer/watchtower-image}"
 read -r IMAGE_REF < "${IMAGE_FILE}"
 
+# THE ENGINE FAILING IS NOT "NO OTHER WATCHTOWER", and one `|| true` over the
+# whole pipeline could not tell those apart. grep exits 1 when nothing matched,
+# docker exits non-zero when it cannot inspect the engine at all, and both used
+# to arrive here as an empty `others` and a preflight that waved the start
+# through. That is the wrong direction to fail: a machine we cannot ask is a
+# machine where we do not know whether a second Watchtower is already running,
+# and starting one anyway is the exact race this script exists to prevent.
+#
+# So the two are now separate: docker's status is checked on its own, and grep's
+# "nothing matched" is the only emptiness allowed to mean no.
+#
 # --filter is matched by docker against the image reference as given. A stack
 # that named a digest or another tag of the same image is not caught here, and
 # that is a known gap rather than an oversight: this check exists to catch the
 # documented path, not to be a lock.
-others="$(docker ps --filter "ancestor=${IMAGE_REF}" --format '{{.Names}}' |
-    grep -vx kantainer-watchtower || true)"
+if ! running="$(docker ps --filter "ancestor=${IMAGE_REF}" --format '{{.Names}}')"; then
+    cat >&2 <<MSG
+Watchtower was not started: this machine's Docker engine could not be asked
+what is running on it, so whether a second Watchtower is already there is
+unknown. docker's own error is above.
+
+  Tried:  docker ps --filter ancestor=${IMAGE_REF}
+  Image:  ${IMAGE_REF}
+
+Starting anyway could put two Watchtowers over one engine, which is the thing
+this check exists to prevent - so it refuses instead. Fix the engine and start
+the unit again:
+
+    systemctl status docker
+    systemctl start kantainer-watchtower
+MSG
+    exit 1
+fi
+
+others=""
+if [[ -n "${running}" ]]; then
+    others="$(grep -vx kantainer-watchtower <<< "${running}" || true)"
+fi
 
 if [[ -n "${others}" ]]; then
     cat >&2 <<MSG

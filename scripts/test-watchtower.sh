@@ -299,6 +299,32 @@ preflight_with "our own stale container is not mistaken for a second Watchtower"
 preflight_with "ours among others still refuses" 1 "kantainer-watchtower
 operator-watchtower"
 
+# FAILING OPEN IS THE WRONG DIRECTION. A `docker ps` that cannot reach the engine
+# and a `docker ps` that found nothing both produce no names, and a guard that
+# cannot tell them apart starts a second Watchtower on the strength of a question
+# it never got an answer to. The stub below refuses the filter it is given, which
+# is how a wrong image reference or an unreachable engine reads from here.
+cat > "${STUB}/docker" <<'STUBEOF'
+#!/bin/bash
+echo "Cannot connect to the Docker daemon" >&2
+exit 1
+STUBEOF
+chmod +x "${STUB}/docker"
+
+engine_status=0
+engine_out="$(PATH="${STUB}:${PATH}" "${WATCHTOWER_PREFLIGHT}" "${STUB}/watchtower-image" 2>&1)" ||
+    engine_status=$?
+
+if [[ "${engine_status}" -ne 0 ]]; then
+    ok "an engine that cannot be asked is refused, not waved through"
+else
+    not_ok "an engine that cannot be asked is waved through (exit 0)
+           docker ps failing is not the same answer as no other Watchtower."
+fi
+
+assert "that refusal says the engine could not be asked" \
+    grep -Fq "could not be asked" <<< "${engine_out}"
+
 # The refusal has to name the container the operator has to go and look at.
 # "One is already running" with no name sends them to `docker ps` to find out
 # which, which is the sentence this message replaces.
