@@ -65,3 +65,33 @@ if [[ "${KANTAINER_WATCHTOWER_ENABLED}" == "true" ]]; then
 else
     echo "  Watchtower will not run. It is carried in the image and can be started later."
 fi
+
+# Tailscale (SPEC.md §spec:tailscale). The key itself is never echoed - this
+# line ends up in terminals and pastes, and a key that reaches one of those is a
+# key to regenerate.
+#
+# The `true` cases name what still has to happen in the admin console, for the
+# same reason the Watchtower line names the label: the likelier surprise is the
+# machine doing exactly what it was told and nothing appearing to change,
+# because the half of the switch that lives on Tailscale's side was never
+# thrown.
+if [[ -n "${KANTAINER_TAILSCALE_AUTHKEY}" ]]; then
+    echo "  Tailscale: joins your tailnet on first boot, as '${KANTAINER_TAILSCALE_HOSTNAME:-kantainer}'."
+
+    if [[ "${KANTAINER_TAILSCALE_EXIT_NODE}" == "true" ]]; then
+        echo "    Offers to be an exit node. Approve it in the admin console, or nothing routes through it."
+    fi
+
+    if [[ -n "${KANTAINER_TAILSCALE_ROUTES}" ]]; then
+        echo "    Offers routes to ${KANTAINER_TAILSCALE_ROUTES}. Approve them in the admin console, or nothing uses them."
+    fi
+
+    if [[ "${KANTAINER_PORTAINER_TAILNET_ONLY}" == "true" ]]; then
+        echo "    Portainer is reachable over the tailnet ONLY - not from your own network."
+        echo "    If Tailscale cannot come up, Portainer does not start. See docs/tailscale.md."
+    fi
+
+    echo "    An auth key expires - 90 days by default. Generate a fresh one when you reflash."
+else
+    echo "  Tailscale will not run. It is in the image and can be started later with \`sudo tailscale up\`."
+fi

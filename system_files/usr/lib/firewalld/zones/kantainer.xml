@@ -20,6 +20,28 @@
                            that assigns addresses automatically, which is IPv4
                            DHCP in practice.
 
+  41641/udp is Tailscale's listening port (SPEC.md §spec:tailscale), and the
+  default set in /etc/default/tailscaled. It is open on EVERY machine, including
+  the ones that never join a tailnet, and that is a deliberate choice between two
+  small costs. On a machine without Tailscale nothing is listening on it, so the
+  port is inert - the kernel answers exactly as it would with the rule absent.
+  The alternative is a zone that varies with the operator's configuration, and
+  firewalld has no drop-in mechanism for zones: varying it means the installer
+  writing /etc/firewalld/zones/kantainer.xml, which SHADOWS this file by name and
+  would freeze that machine's firewall at whatever this repository shipped on the
+  day it was flashed. A port nothing listens on is cheaper than a firewall that
+  stops receiving updates.
+
+  Tailscale works without it, by relaying through Tailscale's own servers. What
+  it buys is the direct connection: with the port blocked, the NAT traversal that
+  would otherwise establish a peer-to-peer path is dropped on arrival, and every
+  byte to this machine goes the long way round.
+
+  Traffic arriving over the tailnet meets these same rules, because tailscale0
+  lands in the default zone like any other unassigned interface - so SSH over the
+  tailnet is allowed by the <service name="ssh"/> line above and needs nothing of
+  its own.
+
   What this zone does NOT do: constrain containers. A published container port
   is DNAT'd and forwarded rather than delivered to INPUT, so it never meets these
   rules. Portainer's 9443 is reachable because it is published, and the entry
@@ -34,8 +56,9 @@
 -->
 <zone>
   <short>kantainer</short>
-  <description>Container host: SSH and the Portainer HTTPS interface only.</description>
+  <description>Container host: SSH, the Portainer HTTPS interface, and Tailscale.</description>
   <service name="ssh"/>
   <port port="9443" protocol="tcp"/>
+  <port port="41641" protocol="udp"/>
   <forward/>
 </zone>

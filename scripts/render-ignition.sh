@@ -13,10 +13,11 @@
 # attaches to on first boot, because at that moment the machine is still stock
 # Fedora CoreOS and has nothing of ours on it (SPEC.md §spec:installer-media).
 #
-# The specification carries the Portainer password in plain text. It is staged
-# in a private temporary directory and handed to butane as a local file, so the
-# password never passes through a substitution and never lands anywhere the
-# operator did not ask for it.
+# The specification carries two credentials in plain text: the Portainer
+# password, and - on a machine that joins a tailnet - the Tailscale
+# authentication key. Both are staged in a private temporary directory and
+# handed to butane as local files, so neither passes through a substitution and
+# neither lands anywhere the operator did not ask for it.
 #
 # The console password is the other way round: the readable value never enters
 # this document at all. `just flash` supplies its hash through
@@ -193,6 +194,51 @@ printf '%s\n' "${template}" > "${BUTANE}"
 # and mean yes.
 if [[ "${KANTAINER_WATCHTOWER_ENABLED}" == "true" ]]; then
     cat "${REPO_ROOT}/butane/watchtower.bu.tmpl" >> "${BUTANE}"
+fi
+
+# Tailscale exists only when the operator supplied an authentication key
+# (§spec:tailscale). config-lib.sh has already refused every other Tailscale
+# field set without one, so the key's presence is the only switch to test here.
+#
+# The key is STAGED, never substituted, exactly like the Portainer password: it
+# is a credential, and a credential that goes through a substitution is one
+# somebody has to think about quoting.
+if [[ -n "${KANTAINER_TAILSCALE_AUTHKEY}" ]]; then
+    # No trailing newline: the file is the key and nothing else.
+    printf '%s' "${KANTAINER_TAILSCALE_AUTHKEY}" > "${STAGING}/tailscale-authkey"
+
+    # The settings the machine joins with, as systemd reads them.
+    #
+    # NOT QUOTED, and that is the correct form rather than an omission. systemd's
+    # EnvironmentFile parser would take surrounding quotes as part of the value
+    # for some shapes and strip them for others; every value here has already
+    # been validated into a shape with no space, quote or backslash in it
+    # (config-lib.sh), so the unquoted form is unambiguous and is what the file
+    # an operator edits by hand should look like.
+    #
+    # Every key is written on every tailnet machine, including the ones left at
+    # their defaults. A file that omitted them would leave an operator reading it
+    # on the machine unable to tell a default from a setting nobody thought
+    # about, and the empty string is exactly what `--advertise-routes` wants for
+    # "advertise nothing".
+    {
+        printf 'KANTAINER_TAILSCALE_HOSTNAME=%s\n' "${KANTAINER_TAILSCALE_HOSTNAME:-kantainer}"
+        printf 'KANTAINER_TAILSCALE_EXIT_NODE=%s\n' "${KANTAINER_TAILSCALE_EXIT_NODE:-false}"
+        printf 'KANTAINER_TAILSCALE_ROUTES=%s\n' "${KANTAINER_TAILSCALE_ROUTES}"
+    } > "${STAGING}/tailscale.env"
+
+    cat "${REPO_ROOT}/butane/tailscale.bu.tmpl" >> "${BUTANE}"
+
+    # Forwarding is for a machine that carries other people's packets, which is
+    # not every machine on a tailnet - so the sysctl is written only for the two
+    # settings that need it.
+    if [[ "${KANTAINER_TAILSCALE_EXIT_NODE}" == "true" || -n "${KANTAINER_TAILSCALE_ROUTES}" ]]; then
+        cat "${REPO_ROOT}/butane/tailscale-forwarding.bu.tmpl" >> "${BUTANE}"
+    fi
+
+    if [[ "${KANTAINER_PORTAINER_TAILNET_ONLY}" == "true" ]]; then
+        cat "${REPO_ROOT}/butane/portainer-tailnet-only.bu.tmpl" >> "${BUTANE}"
+    fi
 fi
 
 # The wireless profile exists only when the operator named a network. A wired

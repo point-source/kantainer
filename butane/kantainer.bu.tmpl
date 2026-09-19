@@ -218,10 +218,16 @@ storage:
       contents:
         local: portainer-admin-password
 
-    # KEEP THE FILES LIST LAST. render-ignition.sh appends up to two further
+    # KEEP THE FILES LIST LAST. render-ignition.sh appends up to five further
     # fragments here, each a further entry of this list:
     #
-    #   butane/watchtower.bu.tmpl  when KANTAINER_WATCHTOWER_ENABLED=true
-    #   butane/wireless.bu.tmpl    when the operator's config names a network
+    #   butane/watchtower.bu.tmpl            when KANTAINER_WATCHTOWER_ENABLED=true
+    #   butane/tailscale.bu.tmpl             when the config carries an auth key
+    #   butane/tailscale-forwarding.bu.tmpl  when that machine also routes for
+    #                                        the tailnet - an exit node, or
+    #                                        advertised routes
+    #   butane/portainer-tailnet-only.bu.tmpl
+    #                                        when KANTAINER_PORTAINER_TAILNET_ONLY=true
+    #   butane/wireless.bu.tmpl              when the operator's config names a network
     #
     # Anything added below would land inside an appended fragment instead.

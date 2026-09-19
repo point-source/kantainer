@@ -25,6 +25,11 @@ KANTAINER_FIELDS=(
     KANTAINER_WIFI_SSID
     KANTAINER_WIFI_PASSPHRASE
     KANTAINER_WATCHTOWER_ENABLED
+    KANTAINER_TAILSCALE_AUTHKEY
+    KANTAINER_TAILSCALE_HOSTNAME
+    KANTAINER_TAILSCALE_EXIT_NODE
+    KANTAINER_TAILSCALE_ROUTES
+    KANTAINER_PORTAINER_TAILNET_ONLY
 )
 
 # Portainer's own minimum for the initial administrator password. Their setup
@@ -47,9 +52,68 @@ KANTAINER_MIN_PASSWORD_LENGTH=12
 KANTAINER_MIN_PASSPHRASE_LENGTH=8
 KANTAINER_MAX_PASSPHRASE_LENGTH=63
 
+# Tailscale's own ceiling on a node name, and DNS's. Tailscale truncates a
+# longer one and lowercases anything it is given, which is the silent rewrite
+# §spec:tailscale refuses: the operator's file would say one thing and the tailnet
+# would show another, with nothing on the machine to say which won.
+KANTAINER_MAX_TAILSCALE_HOSTNAME_LENGTH=63
+
 kantainer_fail() {
     echo "${0##*/}: $*" >&2
     exit 1
+}
+
+# True for a single IPv4 CIDR block, e.g. 192.168.1.0/24.
+#
+# Written out rather than handed to a library because the whole point of this
+# check is that it runs on the operator's own machine, before anything is
+# written, with only bash — the same bash 3.2 macOS ships. Leading zeros are
+# refused: 010.0.0.1 is not the address anybody means, and different parsers
+# disagree about whether it is octal.
+kantainer_is_ipv4_cidr() {
+    local cidr="$1" addr prefix octet rest
+    [[ "${cidr}" == */* ]] || return 1
+    addr="${cidr%%/*}"
+    prefix="${cidr#*/}"
+
+    [[ "${prefix}" =~ ^(0|[1-9][0-9]?)$ ]] || return 1
+    [[ "${prefix}" -le 32 ]] || return 1
+
+    rest="${addr}"
+    local count=0
+    while [[ -n "${rest}" ]]; do
+        octet="${rest%%.*}"
+        if [[ "${rest}" == *.* ]]; then
+            rest="${rest#*.}"
+        else
+            rest=""
+        fi
+        [[ "${octet}" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+        [[ "${octet}" -le 255 ]] || return 1
+        count=$(( count + 1 ))
+    done
+    [[ "${count}" -eq 4 ]]
+}
+
+# True for something shaped like an IPv6 CIDR block, e.g. fd00::/64.
+#
+# DELIBERATELY NOT A FULL IPv6 PARSER. Writing one in bash would be a second
+# implementation of someone else's grammar, and ours would be the one that is
+# wrong about `::` in the edge cases. This catches the mistakes an operator
+# actually makes — a missing prefix, a prefix out of range, a stray character —
+# and leaves the final verdict to tailscaled, which is the only thing that can
+# give one. §spec:tailscale says so rather than implying the check is complete.
+kantainer_is_ipv6_cidr() {
+    local cidr="$1" addr prefix
+    [[ "${cidr}" == */* ]] || return 1
+    addr="${cidr%%/*}"
+    prefix="${cidr#*/}"
+
+    [[ "${prefix}" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+    [[ "${prefix}" -le 128 ]] || return 1
+
+    [[ "${addr}" == *:* ]] || return 1
+    [[ "${addr}" =~ ^[0-9A-Fa-f:]+$ ]]
 }
 
 # Parse <path> into the KANTAINER_* variables named above.
@@ -240,7 +304,132 @@ kantainer_validate_config() {
         esac
     fi
 
+    kantainer_validate_tailscale
+
     kantainer_refuse_if_publishable "${1:-}"
+}
+
+# Tailscale (SPEC.md §spec:tailscale).
+#
+# THE AUTHENTICATION KEY IS THE SWITCH. Every other field here describes a
+# machine that has joined a tailnet, so every other field set without it would
+# be accepted and then do nothing - the failure this repository refuses
+# everywhere else it appears. Each of the four is refused by name rather than as
+# a group, so the operator is told which line to go and fix.
+kantainer_validate_tailscale() {
+    local field value route rest more
+
+    if [[ -n "${KANTAINER_TAILSCALE_AUTHKEY}" ]]; then
+        # Whitespace is what a key picks up on its way through a terminal, a
+        # chat window or a wrapped email. tailscaled would refuse it too, but on
+        # a headless machine that has already installed itself, hours later,
+        # with the operator somewhere else.
+        [[ "${KANTAINER_TAILSCALE_AUTHKEY}" =~ ^[!-~]+$ ]] ||
+            kantainer_fail "KANTAINER_TAILSCALE_AUTHKEY contains a space or a line break
+    Paste the key exactly as Tailscale issued it, with nothing around it."
+
+        # tskey-api-... is an API access token and tskey-auth-... is an
+        # authentication key. They look alike, they are issued from pages that
+        # look alike, and only one of them can bring a machine onto a tailnet.
+        # The other fails at first boot with "invalid key", which reads like a
+        # typo rather than like the wrong kind of key.
+        case "${KANTAINER_TAILSCALE_AUTHKEY}" in
+            tskey-api-*)
+                kantainer_fail "KANTAINER_TAILSCALE_AUTHKEY is an API access token, not an authentication key
+    A tskey-api- token administers your tailnet; it cannot join a machine to it.
+    Generate an auth key instead: Tailscale admin console > Settings > Keys >
+    Generate auth key. It begins tskey-auth-." ;;
+            tskey-*) ;;
+            *)
+                kantainer_fail "KANTAINER_TAILSCALE_AUTHKEY is not a Tailscale authentication key
+    Every Tailscale key begins tskey-. Generate one in the admin console under
+    Settings > Keys > Generate auth key, and paste the whole thing." ;;
+        esac
+    fi
+
+    # The four fields that describe a machine already on a tailnet.
+    for field in KANTAINER_TAILSCALE_HOSTNAME KANTAINER_TAILSCALE_EXIT_NODE \
+        KANTAINER_TAILSCALE_ROUTES KANTAINER_PORTAINER_TAILNET_ONLY; do
+        value="${!field}"
+        if [[ -n "${value}" && "${value}" != "false" && -z "${KANTAINER_TAILSCALE_AUTHKEY}" ]]; then
+            kantainer_fail "${field} is set, but KANTAINER_TAILSCALE_AUTHKEY is not
+    This machine would never join a tailnet, so ${field} would be
+    written down and never used. Set an authentication key, or clear this line."
+        fi
+    done
+
+    # Lower case, and already the name Tailscale will show. Tailscale accepts
+    # `MyBox`, stores `mybox`, and says nothing - so the operator's file and the
+    # admin console would disagree forever about what this machine is called.
+    if [[ -n "${KANTAINER_TAILSCALE_HOSTNAME}" ]]; then
+        [[ "${KANTAINER_TAILSCALE_HOSTNAME}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] ||
+            kantainer_fail "KANTAINER_TAILSCALE_HOSTNAME is not a usable node name: ${KANTAINER_TAILSCALE_HOSTNAME}
+    Lower-case letters, digits and dashes, starting and ending with a letter or
+    digit. Tailscale lowercases and trims whatever it is given, so a name in any
+    other shape would appear in your tailnet as something you did not write."
+
+        [[ "${#KANTAINER_TAILSCALE_HOSTNAME}" -le "${KANTAINER_MAX_TAILSCALE_HOSTNAME_LENGTH}" ]] ||
+            kantainer_fail "KANTAINER_TAILSCALE_HOSTNAME is longer than ${KANTAINER_MAX_TAILSCALE_HOSTNAME_LENGTH} characters
+    That is DNS's limit on one label, and Tailscale truncates rather than
+    refusing - the name in your tailnet would be a prefix of this one."
+    fi
+
+    # Same reasoning as KANTAINER_WATCHTOWER_ENABLED: `yes`, `1` and `on` all
+    # read as agreement to a person and none of them is what the machine tests
+    # for, so accepting them quietly would produce a machine that does not do
+    # the thing and an operator certain that it does.
+    if [[ -n "${KANTAINER_TAILSCALE_EXIT_NODE}" ]]; then
+        case "${KANTAINER_TAILSCALE_EXIT_NODE}" in
+            true | false) ;;
+            *)
+                kantainer_fail "KANTAINER_TAILSCALE_EXIT_NODE must be true or false, not: ${KANTAINER_TAILSCALE_EXIT_NODE}
+    Lower case, exactly. Leave it blank or write false for a machine that joins
+    the tailnet without offering to route the internet for it." ;;
+        esac
+    fi
+
+    if [[ -n "${KANTAINER_PORTAINER_TAILNET_ONLY}" ]]; then
+        case "${KANTAINER_PORTAINER_TAILNET_ONLY}" in
+            true | false) ;;
+            *)
+                kantainer_fail "KANTAINER_PORTAINER_TAILNET_ONLY must be true or false, not: ${KANTAINER_PORTAINER_TAILNET_ONLY}
+    Lower case, exactly. Leave it blank or write false to keep Portainer
+    reachable from your own network as well as from the tailnet." ;;
+        esac
+    fi
+
+    # Comma-separated, no spaces - the form `tailscale up --advertise-routes`
+    # takes, passed through unchanged. Splitting here and refusing each bad block
+    # by name is the difference between "fix line 12" and a tailscaled error on a
+    # machine nobody is watching.
+    if [[ -n "${KANTAINER_TAILSCALE_ROUTES}" ]]; then
+        rest="${KANTAINER_TAILSCALE_ROUTES}"
+        # Loops on the separator rather than on what is left, so that the field
+        # AFTER a final comma is examined too. Stopping when `rest` ran empty
+        # would walk straight past a trailing comma - `192.168.1.0/24,` - and
+        # accept a list this function's own error message calls an empty entry.
+        while :; do
+            route="${rest%%,*}"
+            if [[ "${rest}" == *,* ]]; then
+                rest="${rest#*,}"
+                more=1
+            else
+                rest=""
+                more=""
+            fi
+
+            [[ -n "${route}" ]] ||
+                kantainer_fail "KANTAINER_TAILSCALE_ROUTES has an empty entry: ${KANTAINER_TAILSCALE_ROUTES}
+    Separate routes with a single comma and no spaces."
+
+            kantainer_is_ipv4_cidr "${route}" || kantainer_is_ipv6_cidr "${route}" ||
+                kantainer_fail "KANTAINER_TAILSCALE_ROUTES contains something that is not a network block: ${route}
+    Each entry is an address and a prefix length, e.g. 192.168.1.0/24 - not a
+    single address, and not a range. Separate several with commas and no spaces."
+
+            [[ -n "${more}" ]] || break
+        done
+    fi
 }
 
 # This repository is public and the configuration file carries a password in

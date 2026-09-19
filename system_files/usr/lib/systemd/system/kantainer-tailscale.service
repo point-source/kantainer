@@ -1,0 +1,65 @@
+[Unit]
+Description=Join this machine to its Tailscale network
+Documentation=https://tailscale.com/kb/1085/auth-keys
+Documentation=https://github.com/point-source/kantainer
+After=tailscaled.service network-online.target
+Wants=network-online.target
+
+# Requires, not Wants. tailscaled is deliberately NOT enabled in the image
+# (build_files/build.sh says why): a machine that never asked for Tailscale runs
+# no VPN daemon at all. This line is what starts it on a machine that did -
+# systemd starts a required unit whether or not it is enabled, so the gate below
+# is the only switch, in exactly the way §spec:tailscale describes.
+Requires=tailscaled.service
+
+# THE GATE (SPEC.md §spec:tailscale). This unit is enabled in the image, so
+# nothing has to run on the machine to switch it on - but it starts only if this
+# file exists. The installer writes it when, and only when, the operator's
+# configuration carried an authentication key.
+#
+# A condition rather than leaving the unit disabled: `systemctl status` reports a
+# skipped condition in plain words, so an operator who expected Tailscale and has
+# none is told why. A disabled unit says nothing at all.
+#
+# DELIBERATELY NOT CONDITIONED ON THE KEY FILE. The key is single-use by default
+# and spent once this machine has joined; deleting it afterwards is good hygiene.
+# If the key were the gate, that tidy-up would take the machine off the tailnet
+# at the next reboot and nothing would say why.
+ConditionPathExists=/etc/kantainer/tailscale-enabled
+
+# Three attempts, then stop and stay stopped. The failures this protects against
+# are an expired or already-spent key and a tailnet that refuses this machine -
+# none of which retrying fixes, and all of which produce one clear line in the
+# journal that an endless restart loop would bury. Matches the arrangement on the
+# Portainer and Watchtower units.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+
+# The work is done once per boot and the result - being on the tailnet - outlives
+# it. Without this the unit would show "inactive (dead)" on a machine that is
+# perfectly well connected, which is the status display lying.
+RemainAfterExit=yes
+
+# Absent on a machine where the operator switched Tailscale on by hand rather
+# than through their configuration file, which §spec:tailscale supports. The
+# leading `-` is what makes that a machine running on documented defaults instead
+# of a unit that will not start.
+EnvironmentFile=-/etc/kantainer/tailscale.env
+
+ExecStart=/usr/libexec/kantainer/tailscale-up
+
+# The login screen carries this machine's tailnet address (§spec:console-display),
+# and the address does not exist until the line above has run. Ignored if it
+# fails: a snippet that could not be written is not a reason to report the join
+# itself as failed, and the renderer's own boot-time run will have left an honest
+# line on the screen either way.
+ExecStartPost=-/usr/bin/systemctl restart kantainer-console-tailscale.service
+
+Restart=on-failure
+RestartSec=15s
+
+[Install]
+WantedBy=multi-user.target

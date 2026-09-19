@@ -29,6 +29,16 @@ CONSOLE_PASSWORD="console-test-${LITERALS}"
 SSID="network-${LITERALS}"
 PASSPHRASE="wireless-${LITERALS}"
 
+# The Tailscale key carries NO literal suffix, and that is a property of the
+# field rather than a gap here: config-lib.sh refuses a key containing a space or
+# a line break, because whitespace is what a key picks up on its way through a
+# terminal or a chat window. What this fixture covers for Tailscale is the four
+# settings the renderer turns into files - the staged key, the settings file, the
+# forwarding sysctl and the tailnet-only gate - all of which are bytes macOS and
+# Linux must agree on (§req:sc:byte-identical-render). It authenticates nothing:
+# no tailnet has ever issued this key.
+TAILSCALE_AUTHKEY='tskey-auth-fixture0CNTRL-thiskeyauthenticatesnothing'
+
 VALID="${WORK}/operator.conf"
 DUPLICATE="${WORK}/duplicate.conf"
 RENDERED="${ARTIFACTS}/machine.ign"
@@ -41,6 +51,11 @@ printf '%s\n' \
     'KANTAINER_TARGET_DRIVE=' \
     "KANTAINER_WIFI_SSID=${SSID}" \
     "KANTAINER_WIFI_PASSPHRASE=${PASSPHRASE}" \
+    "KANTAINER_TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY}" \
+    'KANTAINER_TAILSCALE_HOSTNAME=fixture-node' \
+    'KANTAINER_TAILSCALE_EXIT_NODE=true' \
+    'KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,fd00::/64' \
+    'KANTAINER_PORTAINER_TAILNET_ONLY=true' \
     > "${VALID}"
 
 if ! (cd "${REPO_ROOT}" && just config-check "${VALID}") \

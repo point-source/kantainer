@@ -1,0 +1,85 @@
+    # THE TAILSCALE SWITCH (SPEC.md §spec:tailscale).
+    #
+    # scripts/render-ignition.sh appends this fragment to butane/kantainer.bu.tmpl
+    # when, and only when, the operator's configuration carries an
+    # authentication key. A machine that did not ask for Tailscale carries no
+    # trace of it in its Ignition config at all - exactly as a wired machine
+    # carries no wireless profile.
+    #
+    # Three files, and they are deliberately three rather than one:
+    #
+    #   tailscale-enabled  the gate. Existence is the whole of the switch.
+    #   tailscale-authkey  the secret, needed once, at the first join.
+    #   tailscale.env      the settings, read on every boot and editable.
+    #
+    # THE GATE IS SEPARATE FROM THE KEY, AND THAT IS THE POINT. A used
+    # authentication key is spent - single-use by default - and deleting it
+    # afterwards is good hygiene rather than a mistake. If the gate were the key
+    # file, that tidy-up would take the machine off the tailnet at the next
+    # reboot, with nothing anywhere saying why. kantainer-tailscale.service
+    # conditions on the gate and reads the key only when it is actually logged
+    # out, so the key can be removed the moment the machine has joined.
+    #
+    # It is a file rather than an enabled unit for the same reason Watchtower's
+    # is: at this moment the machine is still stock Fedora CoreOS, and
+    # kantainer-tailscale.service does not exist yet to be enabled. It arrives
+    # with the rebase in §spec:installer-media, already enabled, and reads this
+    # path as its ConditionPathExists.
+    #
+    # /etc is persistent and carried forward across OS updates and rollbacks, so
+    # all three outlive every later image.
+    - path: /etc/kantainer/tailscale-enabled
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          # This file existing is what starts kantainer-tailscale.service, which
+          # starts tailscaled. Nothing reads what is written here. To leave the
+          # tailnet:
+          #
+          #     sudo tailscale logout
+          #     sudo rm /etc/kantainer/tailscale-enabled
+          #     sudo systemctl stop kantainer-tailscale tailscaled
+
+    # The authentication key, in plain text (SPEC.md §spec:tailscale).
+    #
+    # 0600 root:root, and staged as a file rather than substituted into this
+    # document, for the same reason the Portainer password is: nothing here has
+    # to be escaped, and the key never passes through a sed expression.
+    #
+    # /usr/libexec/kantainer/tailscale-up hands this path to `tailscale up` as
+    # --auth-key=file:..., so the key itself never appears on a command line, in
+    # `ps`, or in the journal.
+    #
+    # NO TRAILING NEWLINE: the file is the key and nothing else. Tailscale does
+    # trim one, but a reader should not have to know that.
+    - path: /etc/kantainer/tailscale-authkey
+      mode: 0600
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: tailscale-authkey
+
+    # What this machine asks for when it joins (SPEC.md §spec:tailscale).
+    #
+    # Read by kantainer-tailscale.service as an EnvironmentFile, so an operator
+    # can change any of it on the machine and restart the unit. It carries no
+    # secret - the key is the file above - which is why it is 0644 and readable.
+    #
+    # Written by render-ignition.sh from the operator's configuration, rather
+    # than being a copy of defaults they then edit. A machine's settings and the
+    # configuration file that built it say the same thing, which is what makes
+    # reflashing from that file reproduce this machine.
+    - path: /etc/kantainer/tailscale.env
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        local: tailscale.env

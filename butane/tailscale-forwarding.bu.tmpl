@@ -1,0 +1,41 @@
+    # IP FORWARDING, for a machine that carries traffic for its tailnet
+    # (SPEC.md §spec:tailscale).
+    #
+    # Appended by render-ignition.sh only when the operator asked this machine to
+    # be an exit node or to advertise routes. A machine that joins a tailnet for
+    # its own sake does not forward anything and gets no such file: turning on
+    # forwarding widens what a machine does with packets that are not addressed
+    # to it, and that is not a side effect to hand somebody who asked for a VPN.
+    #
+    # WITHOUT THIS, THE FEATURE FAILS QUIETLY IN THE WORST WAY. `tailscale up`
+    # succeeds, the admin console offers the route for approval, the operator
+    # approves it - and every packet sent through this machine is dropped by the
+    # kernel. Nothing in Tailscale's status is red. tailscaled does print a
+    # warning at the moment it comes up, which is one line in a journal nobody is
+    # reading on a headless machine that just installed itself.
+    #
+    # IPv4 forwarding is very probably already on: Docker sets it when the daemon
+    # starts, because it needs it for container networking. That is exactly why
+    # it is stated here anyway - it would otherwise be a property this machine
+    # borrows from another service's side effect, and a Docker that failed to
+    # start would take subnet routing with it for reasons nobody would connect.
+    #
+    # IPv6 forwarding is NOT already on, and is needed for any IPv6 route and for
+    # an exit node carrying IPv6 traffic.
+    #
+    # /etc/sysctl.d rather than /usr/lib/sysctl.d because this is the operator's
+    # choice about this machine, not the image's about every machine - and /etc
+    # is what survives to the installed system from here.
+    - path: /etc/sysctl.d/99-kantainer-tailscale-forwarding.conf
+      mode: 0644
+      user:
+        id: 0
+      group:
+        id: 0
+      contents:
+        inline: |
+          # Written because this machine advertises routes or offers itself as an
+          # exit node (SPEC.md §spec:tailscale). Without both lines the kernel
+          # drops every packet Tailscale asks it to carry, and nothing says so.
+          net.ipv4.ip_forward = 1
+          net.ipv6.conf.all.forwarding = 1

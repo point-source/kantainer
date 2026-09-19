@@ -1,0 +1,121 @@
+#!/bin/bash
+# Put this machine's tailnet address on the login screen
+# (SPEC.md §spec:console-display, §spec:tailscale).
+#
+# The operator standing at the machine has one question the screen can answer
+# before they log in: what do I type into a browser. console-network-snippet
+# answers it for this machine's own network. This answers it for the other
+# network a kantainer machine can be on - and on a machine where Portainer is
+# bound to the tailnet alone, it is the ONLY place that answer exists.
+#
+# WHY THIS IS NOT PART OF console-network-snippet. That generator walks
+# NetworkManager's device list, and tailscale0 is not in it: tailscaled manages
+# its own interface and NetworkManager reports it, when it reports it at all, as
+# unmanaged. A device filter that let unmanaged devices through would also let
+# through every bridge Portainer creates, which is the thing that filter exists
+# to keep off the screen.
+#
+# It is also driven differently. The network block is re-rendered by a
+# NetworkManager dispatcher on every link and address change; no such event fires
+# for tailscale0. This unit is restarted by kantainer-tailscale.service once the
+# join has actually completed, which is the moment - and the only moment - the
+# address comes into existence.
+#
+# THE BLOCK IS ABSENT, NOT EMPTY, ON A MACHINE WITHOUT TAILSCALE. Both the unit
+# and this script condition on the gate file, so a machine that never joined a
+# tailnet shows the screen it showed before this feature existed rather than a
+# line explaining an absence nobody asked about.
+#
+# Arguments exist for the tests, which source this file and replace
+# kantainer_tailscale. The unit passes none, and main() runs only when the file
+# is executed rather than sourced.
+
+set -oue pipefail
+
+PORTAINER_PORT=9443
+
+# 92_ so the block lands directly below 91_kantainer_portainer.issue, and with it
+# below the platform's own snippets. agetty version-sorts the directory.
+# /usr/lib/tmpfiles.d/kantainer.conf already clears the whole *_kantainer_*
+# marker at boot, so this filename needs nothing there.
+SNIPPET_NAME=92_kantainer_tailscale.issue
+
+GATE=/etc/kantainer/tailscale-enabled
+
+# Existence means Portainer is published on the tailnet address alone, so the
+# address below is the only one that reaches it (§spec:tailscale).
+TAILNET_ONLY=/etc/kantainer/portainer-tailnet-only
+
+CLHM_LIB=/usr/lib/console-login-helper-messages/libutil.sh
+CLHM_ISSUE_DEFS=/usr/lib/console-login-helper-messages/issue.defs
+
+# The only thing here that reads the machine. The tests replace it.
+kantainer_tailscale() {
+    tailscale "$@"
+}
+
+# This machine's tailnet IPv4 address, or nothing.
+#
+# `tailscale ip -4` exits non-zero and explains itself on stderr when there is no
+# address yet - verified against the pinned Tailscale, where a logged-out machine
+# prints "no current Tailscale IPs; state: NeedsLogin". That message is for a
+# journal, not for a login screen, so it is discarded and the absence is reported
+# in this script's own words below.
+kantainer_tailnet_address() {
+    local address
+    address="$(kantainer_tailscale ip -4 2> /dev/null)" || return 1
+    address="${address%%$'\n'*}"
+    [[ -n "${address}" ]] || return 1
+    printf '%s' "${address}"
+}
+
+# The whole block, on stdout. Never empty on a machine that asked for Tailscale:
+# a machine that has not joined yet says so, because a missing line reads as a
+# broken display rather than as a machine with nowhere to be reached
+# (§req:sc:screen-says-no-address).
+kantainer_tailscale_block() {
+    local address
+
+    if ! address="$(kantainer_tailnet_address)"; then
+        # Said in words, and the second line only where it changes what the
+        # operator should do. On a tailnet-only machine this is not a missing
+        # convenience - it is the whole reason Portainer is not answering, and
+        # the screen should say so rather than leave them reloading a browser.
+        echo 'Tailscale: not connected - no tailnet address yet.'
+        if [[ -e "${TAILNET_ONLY}" ]]; then
+            echo 'Portainer is published on the tailnet only, so it is not reachable until this clears.'
+        fi
+        return 0
+    fi
+
+    printf 'Portainer at https://%s:%s (tailnet)\n' "${address}" "${PORTAINER_PORT}"
+}
+
+main() {
+    # A machine that never asked for Tailscale writes nothing at all. The
+    # tmpfiles rule clears the snippet at every boot, so there is no stale block
+    # left behind by a machine that has since been taken off its tailnet.
+    [[ -e "${GATE}" ]] || return 0
+
+    # RUN_SNIPPETS and write_via_tempfile come from the platform. Its writer
+    # stages the file under /run, renames it into place and relabels it, which is
+    # what keeps a half-written block off the screen. No check that these exist
+    # first: `set -e` already stops here with the missing path named, and the
+    # condition needs a base image without console-login-helper-messages, which
+    # the digest pin in the Containerfile makes a deliberate act.
+    # shellcheck source=/dev/null
+    . "${CLHM_LIB}"
+    # shellcheck source=/dev/null
+    . "${CLHM_ISSUE_DEFS}"
+
+    kantainer_tailscale_block | write_via_tempfile "${RUN_SNIPPETS}/${SNIPPET_NAME}"
+
+    # Redraw every waiting login prompt. Without it the block is written
+    # correctly and never seen: the prompt keeps whatever was on it when the
+    # machine booted.
+    /usr/sbin/agetty --reload
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

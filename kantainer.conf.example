@@ -110,3 +110,82 @@ KANTAINER_WIFI_PASSPHRASE=
 # docs/watchtower.md before switching it on - including how to change the
 # schedule, add notifications, or have it update every container instead.
 KANTAINER_WATCHTOWER_ENABLED=
+
+
+### Optional — Tailscale
+
+# Tailscale joins this machine to your private network, so you can reach it and
+# Portainer from anywhere without opening a port on your router
+# (SPEC.md §spec:tailscale). Leave every line below blank for a machine that is
+# only ever reachable from your own network.
+#
+# THE KEY IS THE SWITCH. Set it and the machine joins your tailnet on first
+# boot, with nobody watching. Leave it blank and Tailscale never starts - it is
+# in the image either way, and you can run `sudo tailscale up` on the machine
+# later.
+#
+# Generate one in the Tailscale admin console under Settings > Keys > Generate
+# auth key. It begins tskey-auth-. An API access token (tskey-api-) is a
+# different thing and cannot join a machine to a tailnet.
+#
+# NOTES ON THE KEY ITSELF, because both of these surprise people:
+#
+#   - a key EXPIRES, by default in 90 days, and the expiry is on the key not the
+#     machine. A stick flashed today still installs a machine next year; the key
+#     inside it will not join anything. Generate a fresh key when you reflash.
+#   - a key is single-use unless you tick "Reusable". Single-use is fine and is
+#     the better choice: it is spent the moment this machine joins.
+#
+# The key is used once, to join. After that the machine's own credentials live
+# in /var/lib/tailscale and the key is not needed again.
+KANTAINER_TAILSCALE_AUTHKEY=
+
+# What this machine is called on your tailnet. Lower-case letters, digits and
+# dashes. Blank means `kantainer`.
+#
+# Worth setting if you have more than one. Nothing here sets the machine's
+# system hostname, so without this field every kantainer machine arrives in your
+# tailnet under the same name and Tailscale disambiguates them with a numeric
+# suffix.
+KANTAINER_TAILSCALE_HOSTNAME=
+
+# Whether this machine offers to carry the tailnet's internet traffic. `true` or
+# `false`; blank means false.
+#
+# Switching this on here only OFFERS. Nothing routes through this machine until
+# you also approve it in the Tailscale admin console, under this machine's
+# entry - and then only for devices you point at it.
+KANTAINER_TAILSCALE_EXIT_NODE=
+
+# Networks this machine makes reachable to the rest of your tailnet, so that
+# devices on it can reach your other hardware - a NAS, a printer, a router's
+# admin page - without running Tailscale themselves.
+#
+# Comma-separated network blocks, no spaces. Each is an address and a prefix
+# length, not a single address:
+#
+#     KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24
+#     KANTAINER_TAILSCALE_ROUTES=192.168.1.0/24,10.8.0.0/16
+#
+# As with the exit node, this only OFFERS. Each route has to be approved in the
+# admin console before anything uses it.
+KANTAINER_TAILSCALE_ROUTES=
+
+# Whether Portainer is reachable ONLY over the tailnet. `true` or `false`;
+# blank means false. Needs an authentication key above.
+#
+# `false` - the default - keeps Portainer where it is today: reachable at this
+# machine's address on your own network, and also over the tailnet once the
+# machine has joined one.
+#
+# `true` binds Portainer's port to the tailnet address alone. Nobody on your own
+# network can reach it, including you, standing next to the machine, without
+# Tailscale on the device you are holding.
+#
+# WHAT IT COSTS, because it is a real cost and not a theoretical one: if
+# Tailscale cannot come up, Portainer does not start. There is no address left
+# to serve on. The containers you deployed keep running - this is Portainer's
+# own port and nothing else - but managing them means fixing Tailscale first,
+# over SSH or at the machine's own keyboard. Set KANTAINER_CONSOLE_PASSWORD
+# above if you choose this.
+KANTAINER_PORTAINER_TAILNET_ONLY=
